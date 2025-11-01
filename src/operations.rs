@@ -1,0 +1,104 @@
+use crate::progress;
+use indicatif::ProgressBar;
+use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+pub struct MoveStats {
+    pub moved: usize,
+}
+
+#[derive(Debug)]
+pub enum MoveError {
+    Io {
+        source: std::io::Error,
+        path: PathBuf,
+    },
+    MissingFileName(PathBuf),
+}
+
+impl Display for MoveError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io { source, path } => write!(f, "failed to move {}: {}", path.display(), source),
+            Self::MissingFileName(path) => write!(f, "file name not found for {}", path.display()),
+        }
+    }
+}
+
+impl Error for MoveError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+pub fn move_duplicates(
+    checksum_map: &HashMap<u64, Vec<PathBuf>>,
+    target_directory: &Path,
+) -> Result<MoveStats, MoveError> {
+    let total = total_duplicates(checksum_map) as u64;
+    let progress_bar = ProgressBar::new(total);
+    progress_bar.set_style(progress::default_style());
+
+    let mut moved = 0;
+    for files in checksum_map.values().filter(|files| files.len() > 1) {
+        for source in files.iter().skip(1) {
+            let destination = resolve_destination(target_directory, source)?;
+            fs::rename(source, &destination).map_err(|error| MoveError::Io {
+                source: error,
+                path: source.clone(),
+            })?;
+            moved += 1;
+            progress_bar.inc(1);
+            progress_bar.set_message(format!("Moving: {}", destination.display()));
+        }
+    }
+
+    progress_bar.finish_with_message("File moving complete");
+    Ok(MoveStats { moved })
+}
+
+fn total_duplicates(checksum_map: &HashMap<u64, Vec<PathBuf>>) -> usize {
+    checksum_map
+        .values()
+        .filter(|files| files.len() > 1)
+        .map(|files| files.len() - 1)
+        .sum()
+}
+
+fn resolve_destination(target_directory: &Path, source: &Path) -> Result<PathBuf, MoveError> {
+    let file_name = source
+        .file_name()
+        .ok_or_else(|| MoveError::MissingFileName(source.to_path_buf()))?;
+
+    let mut candidate = target_directory.join(file_name);
+    if !candidate.exists() {
+        return Ok(candidate);
+    }
+
+    let stem = source
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.to_string())
+        .unwrap_or_else(|| String::from("file"));
+    let extension = source.extension().and_then(|ext| ext.to_str());
+    let mut index = 1;
+
+    loop {
+        let mut name = format!("{} ({})", stem, index);
+        if let Some(ext) = extension {
+            name.push('.');
+            name.push_str(ext);
+        }
+        candidate = target_directory.join(name);
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+        index += 1;
+    }
+}
