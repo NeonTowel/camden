@@ -1,14 +1,16 @@
 use crate::cli::ThreadingMode;
 use indicatif::ProgressBar;
 use rayon::prelude::*;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fs::File;
 use std::hash::Hasher;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use twox_hash::XxHash64;
 use walkdir::WalkDir;
+
+pub type DuplicateMap = FxHashMap<u64, Vec<PathBuf>>;
 
 pub fn count_entries(root: &Path) -> u64 {
     WalkDir::new(root).into_iter().count() as u64
@@ -19,53 +21,71 @@ pub fn scan(
     extensions: &[String],
     threading: ThreadingMode,
     progress_bar: &Arc<ProgressBar>,
-) -> HashMap<u64, Vec<PathBuf>> {
-    let checksum_map: Arc<Mutex<HashMap<u64, Vec<PathBuf>>>> = Arc::new(Mutex::new(HashMap::new()));
-
-    if matches!(threading, ThreadingMode::Parallel) {
-        WalkDir::new(root)
-            .into_iter()
-            .par_bridge()
-            .for_each(|entry| process_entry(&entry, &checksum_map, progress_bar, extensions));
-    } else {
-        for entry in WalkDir::new(root) {
-            process_entry(&entry, &checksum_map, progress_bar, extensions);
-        }
-    }
-
-    match Arc::try_unwrap(checksum_map) {
-        Ok(mutex) => match mutex.into_inner() {
-            Ok(map) => map,
-            Err(poisoned) => poisoned.into_inner(),
-        },
-        Err(shared) => match shared.lock() {
-            Ok(mut guard) => std::mem::take(&mut *guard),
-            Err(poisoned) => {
-                let mut guard = poisoned.into_inner();
-                std::mem::take(&mut *guard)
-            }
-        },
+) -> DuplicateMap {
+    match threading {
+        ThreadingMode::Parallel => scan_parallel(root, extensions, progress_bar),
+        ThreadingMode::Sequential => scan_sequential(root, extensions, progress_bar),
     }
 }
 
-fn process_entry(
-    entry: &Result<walkdir::DirEntry, walkdir::Error>,
-    checksum_map: &Arc<Mutex<HashMap<u64, Vec<PathBuf>>>>,
-    progress_bar: &Arc<ProgressBar>,
+fn scan_parallel(
+    root: &Path,
     extensions: &[String],
-) {
-    if let Ok(entry) = entry {
-        let path = entry.path();
-        if path.is_file() && has_image_extension(path, extensions) {
-            if let Ok(checksum) = compute_checksum(path) {
-                if let Ok(mut map) = checksum_map.lock() {
-                    map.entry(checksum).or_default().push(path.to_path_buf());
+    progress_bar: &Arc<ProgressBar>,
+) -> DuplicateMap {
+    WalkDir::new(root)
+        .into_iter()
+        .par_bridge()
+        .filter_map(|entry| handle_entry(entry, extensions, progress_bar))
+        .fold(DuplicateMap::default, |mut map, (checksum, path)| {
+            map.entry(checksum).or_default().push(path);
+            map
+        })
+        .reduce(DuplicateMap::default, merge_maps)
+}
+
+fn scan_sequential(
+    root: &Path,
+    extensions: &[String],
+    progress_bar: &Arc<ProgressBar>,
+) -> DuplicateMap {
+    let mut map = DuplicateMap::default();
+    for entry in WalkDir::new(root) {
+        if let Some((checksum, path)) = handle_entry(entry, extensions, progress_bar) {
+            map.entry(checksum).or_default().push(path);
+        }
+    }
+    map
+}
+
+fn merge_maps(mut left: DuplicateMap, mut right: DuplicateMap) -> DuplicateMap {
+    for (checksum, mut files) in right.drain() {
+        left.entry(checksum).or_default().append(&mut files);
+    }
+    left
+}
+
+fn handle_entry(
+    entry: Result<walkdir::DirEntry, walkdir::Error>,
+    extensions: &[String],
+    progress_bar: &Arc<ProgressBar>,
+) -> Option<(u64, PathBuf)> {
+    progress_bar.inc(1);
+    match entry {
+        Ok(entry) => {
+            let path = entry.path().to_path_buf();
+            progress_bar.set_message(format!("Scanning: {}", path.display()));
+            if path.is_file() && has_image_extension(&path, extensions) {
+                if let Ok(checksum) = compute_checksum(&path) {
+                    return Some((checksum, path));
                 }
             }
         }
-        progress_bar.inc(1);
-        progress_bar.set_message(format!("Scanning: {}", path.display()));
+        Err(error) => {
+            progress_bar.set_message(format!("Error: {}", error));
+        }
     }
+    None
 }
 
 fn has_image_extension(path: &Path, extensions: &[String]) -> bool {

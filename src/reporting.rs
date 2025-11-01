@@ -1,10 +1,10 @@
+use crate::scanner::DuplicateMap;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::BufWriter;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Serialize)]
 struct IdenticalFiles {
@@ -29,7 +29,7 @@ impl Display for ReportingError {
 
 impl Error for ReportingError {}
 
-pub fn print_duplicates(checksum_map: &HashMap<u64, Vec<PathBuf>>) {
+pub fn print_duplicates(checksum_map: &DuplicateMap) {
     for (_, files) in checksum_map.iter().filter(|(_, files)| files.len() > 1) {
         println!("Identical files:");
         for file in files {
@@ -39,10 +39,7 @@ pub fn print_duplicates(checksum_map: &HashMap<u64, Vec<PathBuf>>) {
     }
 }
 
-pub fn write_json(
-    checksum_map: &HashMap<u64, Vec<PathBuf>>,
-    output_path: &Path,
-) -> Result<(), ReportingError> {
+pub fn write_json(checksum_map: &DuplicateMap, output_path: &Path) -> Result<(), ReportingError> {
     let identical_files: Vec<IdenticalFiles> = checksum_map
         .iter()
         .filter(|(_, files)| files.len() > 1)

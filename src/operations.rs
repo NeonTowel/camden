@@ -1,6 +1,6 @@
 use crate::progress;
+use crate::scanner::DuplicateMap;
 use indicatif::ProgressBar;
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -38,7 +38,7 @@ impl Error for MoveError {
 }
 
 pub fn move_duplicates(
-    checksum_map: &HashMap<u64, Vec<PathBuf>>,
+    checksum_map: &DuplicateMap,
     target_directory: &Path,
 ) -> Result<MoveStats, MoveError> {
     let total = total_duplicates(checksum_map) as u64;
@@ -63,7 +63,7 @@ pub fn move_duplicates(
     Ok(MoveStats { moved })
 }
 
-fn total_duplicates(checksum_map: &HashMap<u64, Vec<PathBuf>>) -> usize {
+fn total_duplicates(checksum_map: &DuplicateMap) -> usize {
     checksum_map
         .values()
         .filter(|files| files.len() > 1)
@@ -106,7 +106,6 @@ fn resolve_destination(target_directory: &Path, source: &Path) -> Result<PathBuf
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use std::fs;
     use tempfile::tempdir;
 
@@ -126,7 +125,7 @@ mod tests {
         fs::write(&other, b"same").unwrap();
         let existing = target_dir.path().join("dup.jpg");
         fs::write(&existing, b"existing").unwrap();
-        let mut map = HashMap::new();
+        let mut map = DuplicateMap::default();
         map.insert(1, vec![keep.clone(), nested.clone(), other.clone()]);
         let stats = move_duplicates(&map, target_dir.path()).unwrap();
         assert_eq!(stats.moved, 2);
