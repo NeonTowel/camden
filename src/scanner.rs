@@ -93,3 +93,61 @@ fn compute_checksum(path: &Path) -> std::io::Result<u64> {
 
     Ok(hasher.finish())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::ThreadingMode;
+    use indicatif::ProgressBar;
+    use std::fs;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    fn write_file(path: &Path, data: &[u8]) {
+        fs::write(path, data).unwrap();
+    }
+
+    fn scan_duplicates(mode: ThreadingMode) {
+        let dir = tempdir().unwrap();
+        let first = dir.path().join("a.jpg");
+        let second = dir.path().join("b.jpg");
+        let third = dir.path().join("c.png");
+        write_file(&first, b"same");
+        write_file(&second, b"same");
+        write_file(&third, b"diff");
+        let progress = Arc::new(ProgressBar::hidden());
+        let map = scan(
+            dir.path(),
+            &[String::from("jpg"), String::from("png")],
+            mode,
+            &progress,
+        );
+        let duplicates: Vec<_> = map.values().filter(|files| files.len() > 1).collect();
+        assert_eq!(duplicates.len(), 1);
+        let files = duplicates.first().unwrap();
+        assert!(files.contains(&first));
+        assert!(files.contains(&second));
+        assert!(map
+            .values()
+            .any(|items| items.len() == 1 && items[0] == third));
+    }
+
+    #[test]
+    fn scan_detects_duplicates_parallel() {
+        scan_duplicates(ThreadingMode::Parallel);
+    }
+
+    #[test]
+    fn scan_detects_duplicates_sequential() {
+        scan_duplicates(ThreadingMode::Sequential);
+    }
+
+    #[test]
+    fn count_entries_includes_root_and_files() {
+        let dir = tempdir().unwrap();
+        write_file(&dir.path().join("a.jpg"), b"one");
+        write_file(&dir.path().join("b.jpg"), b"two");
+        write_file(&dir.path().join("c.jpg"), b"three");
+        assert_eq!(count_entries(dir.path()), 4);
+    }
+}

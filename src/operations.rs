@@ -102,3 +102,49 @@ fn resolve_destination(target_directory: &Path, source: &Path) -> Result<PathBuf
         index += 1;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn move_duplicates_moves_files_and_generates_unique_names() {
+        let source_dir = tempdir().unwrap();
+        let target_dir = tempdir().unwrap();
+        let keep = source_dir.path().join("dup.jpg");
+        fs::write(&keep, b"same").unwrap();
+        let nested_dir = source_dir.path().join("nested");
+        fs::create_dir_all(&nested_dir).unwrap();
+        let nested = nested_dir.join("dup.jpg");
+        fs::write(&nested, b"same").unwrap();
+        let other_dir = source_dir.path().join("other");
+        fs::create_dir_all(&other_dir).unwrap();
+        let other = other_dir.join("dup.jpg");
+        fs::write(&other, b"same").unwrap();
+        let existing = target_dir.path().join("dup.jpg");
+        fs::write(&existing, b"existing").unwrap();
+        let mut map = HashMap::new();
+        map.insert(1, vec![keep.clone(), nested.clone(), other.clone()]);
+        let stats = move_duplicates(&map, target_dir.path()).unwrap();
+        assert_eq!(stats.moved, 2);
+        assert!(keep.exists());
+        assert!(!nested.exists());
+        assert!(!other.exists());
+        let mut names: Vec<_> = fs::read_dir(target_dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                String::from("dup (1).jpg"),
+                String::from("dup (2).jpg"),
+                String::from("dup.jpg")
+            ]
+        );
+    }
+}
