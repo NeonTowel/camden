@@ -1,4 +1,5 @@
 mod cli;
+mod detector;
 mod operations;
 mod progress;
 mod reporting;

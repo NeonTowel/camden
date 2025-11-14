@@ -1,2 +1,5 @@
 /target
-.idea
+.idea.envrc
+.envrc
+vcpkg_installed
+identical_files.json

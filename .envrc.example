@@ -1,0 +1,5 @@
+export OPENCV_LINK_PATHS="D:/vcpkg/installed/x64-windows-static-md/lib/"
+export OPENCV_DIR="D:/vcpkg/installed/x64-windows-static-md"
+export VCPKGRS_TRIPLET="x64-windows-static-md"
+export VCPKGRS_DYNAMIC="0"
+export VCPKG_ROOT="D:/vcpkg"
