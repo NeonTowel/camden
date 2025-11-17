@@ -165,6 +165,7 @@ mod tests {
             captured_at: None,
             dominant_color: [0, 0, 0],
             confidence: 1.0,
+            thumbnail: None,
         }
     }
 }

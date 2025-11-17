@@ -114,6 +114,7 @@ pub struct ImageMetadata {
     pub captured_at: Option<String>,
     pub dominant_color: [u8; 3],
     pub confidence: f32,
+    pub thumbnail: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -247,6 +248,7 @@ fn file_metadata(
         captured_at,
         dominant_color,
         confidence: 1.0,
+        thumbnail: None,
     })
 }
 

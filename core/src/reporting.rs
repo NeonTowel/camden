@@ -21,6 +21,7 @@ struct FileDescriptor {
     captured_at: Option<String>,
     dominant_color: [u8; 3],
     confidence: f32,
+    thumbnail: Option<String>,
 }
 
 #[derive(Debug)]
@@ -66,6 +67,10 @@ pub fn write_json(summary: &ScanSummary, output_path: &Path) -> Result<(), Repor
                     captured_at: entry.captured_at.clone(),
                     dominant_color: entry.dominant_color,
                     confidence: entry.confidence,
+                    thumbnail: entry
+                        .thumbnail
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().into_owned()),
                 })
                 .collect(),
         })

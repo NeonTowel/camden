@@ -1,4 +1,5 @@
 use crate::detector::{DuplicateDetector, ImageAnalysis, ImageFeatures, ImageMetadata};
+use crate::thumbnails::ThumbnailCache;
 use indicatif::ProgressBar;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -20,6 +21,7 @@ pub enum ThreadingMode {
 pub struct ScanConfig {
     pub extensions: Vec<String>,
     pub threading: ThreadingMode,
+    pub thumbnail_cache_root: Option<PathBuf>,
 }
 
 impl ScanConfig {
@@ -28,7 +30,13 @@ impl ScanConfig {
         Self {
             extensions,
             threading,
+            thumbnail_cache_root: None,
         }
+    }
+
+    pub fn with_thumbnail_root(mut self, root: PathBuf) -> Self {
+        self.thumbnail_cache_root = Some(root);
+        self
     }
 }
 
@@ -42,6 +50,7 @@ pub struct DuplicateEntry {
     pub captured_at: Option<String>,
     pub dominant_color: [u8; 3],
     pub confidence: f32,
+    pub thumbnail: Option<PathBuf>,
 }
 
 /// A cluster of visually identical images identified during a scan.
@@ -75,9 +84,12 @@ pub fn count_entries(root: &Path) -> u64 {
 
 pub fn scan(root: &Path, config: &ScanConfig, progress_bar: &Arc<ProgressBar>) -> ScanSummary {
     let detector = DuplicateDetector::default();
+    let cache = ThumbnailCache::new(config.thumbnail_cache_root.clone())
+        .ok()
+        .map(Arc::new);
     let groups = match config.threading {
-        ThreadingMode::Parallel => scan_parallel(root, config, progress_bar, &detector),
-        ThreadingMode::Sequential => scan_sequential(root, config, progress_bar, &detector),
+        ThreadingMode::Parallel => scan_parallel(root, config, progress_bar, &detector, &cache),
+        ThreadingMode::Sequential => scan_sequential(root, config, progress_bar, &detector, &cache),
     };
 
     ScanSummary { groups }
@@ -88,11 +100,12 @@ fn scan_parallel(
     config: &ScanConfig,
     progress_bar: &Arc<ProgressBar>,
     detector: &DuplicateDetector,
+    cache: &Option<Arc<ThumbnailCache>>,
 ) -> Vec<DuplicateGroup> {
     let records = WalkDir::new(root)
         .into_iter()
         .par_bridge()
-        .filter_map(|entry| handle_entry(entry, config, progress_bar, detector))
+        .filter_map(|entry| handle_entry(entry, config, progress_bar, detector, cache.as_deref()))
         .fold(Vec::new, |mut collection, record| {
             collection.push(record);
             collection
@@ -110,10 +123,12 @@ fn scan_sequential(
     config: &ScanConfig,
     progress_bar: &Arc<ProgressBar>,
     detector: &DuplicateDetector,
+    cache: &Option<Arc<ThumbnailCache>>,
 ) -> Vec<DuplicateGroup> {
     let mut records = Vec::new();
     for entry in WalkDir::new(root) {
-        if let Some(record) = handle_entry(entry, config, progress_bar, detector) {
+        if let Some(record) = handle_entry(entry, config, progress_bar, detector, cache.as_deref())
+        {
             records.push(record);
         }
     }
@@ -125,6 +140,7 @@ fn handle_entry(
     config: &ScanConfig,
     progress_bar: &Arc<ProgressBar>,
     detector: &DuplicateDetector,
+    cache: Option<&ThumbnailCache>,
 ) -> Option<ImageRecord> {
     progress_bar.inc(1);
     match entry {
@@ -133,7 +149,17 @@ fn handle_entry(
             progress_bar.set_message(format!("Scanning: {}", path.display()));
             if path.is_file() && has_image_extension(&path, &config.extensions) {
                 match detector.analyze(&path) {
-                    Ok(analysis) => {
+                    Ok(mut analysis) => {
+                        if let Some(cache) = cache {
+                            match cache.ensure(&path, analysis.features.fingerprint) {
+                                Ok(thumbnail) => {
+                                    analysis.metadata.thumbnail = Some(thumbnail);
+                                }
+                                Err(error) => {
+                                    progress_bar.set_message(format!("Thumbnail error: {}", error));
+                                }
+                            }
+                        }
                         return Some(ImageRecord { path, analysis });
                     }
                     Err(error) => {
@@ -173,14 +199,18 @@ fn group_records(records: Vec<ImageRecord>, detector: &DuplicateDetector) -> Vec
             files: state
                 .entries
                 .into_iter()
-                .map(|entry| DuplicateEntry {
-                    path: entry.path,
-                    size_bytes: entry.metadata.size_bytes,
-                    dimensions: entry.metadata.dimensions,
-                    modified: entry.metadata.modified,
-                    captured_at: entry.metadata.captured_at,
-                    dominant_color: entry.metadata.dominant_color,
-                    confidence: entry.metadata.confidence,
+                .map(|entry| {
+                    let AnalyzedFile { path, metadata } = entry;
+                    DuplicateEntry {
+                        path,
+                        size_bytes: metadata.size_bytes,
+                        dimensions: metadata.dimensions,
+                        modified: metadata.modified,
+                        captured_at: metadata.captured_at,
+                        dominant_color: metadata.dominant_color,
+                        confidence: metadata.confidence,
+                        thumbnail: metadata.thumbnail,
+                    }
                 })
                 .collect(),
         })
@@ -278,6 +308,7 @@ mod tests {
 
     fn scan_duplicates(mode: ThreadingMode) {
         let dir = tempdir().unwrap();
+        let thumb_dir = tempdir().unwrap();
         let first = dir.path().join("a.jpg");
         let second = dir.path().join("b.jpg");
         let third = dir.path().join("c.png");
@@ -285,7 +316,8 @@ mod tests {
         write_image(&second, 64);
         write_image(&third, 200);
         let progress = Arc::new(ProgressBar::hidden());
-        let config = ScanConfig::new(vec![String::from("jpg"), String::from("png")], mode);
+        let config = ScanConfig::new(vec![String::from("jpg"), String::from("png")], mode)
+            .with_thumbnail_root(thumb_dir.path().to_path_buf());
         let summary = scan(dir.path(), &config, &progress);
         let duplicates: Vec<_> = summary.duplicate_groups().collect();
         assert_eq!(duplicates.len(), 1);
@@ -295,6 +327,11 @@ mod tests {
         assert!(paths.contains(&second));
         assert!(files.iter().all(|entry| entry.size_bytes > 0));
         assert!(files.iter().all(|entry| entry.dimensions == (64, 64)));
+        assert!(files.iter().all(|entry| entry
+            .thumbnail
+            .as_ref()
+            .map(|path| path.exists())
+            .unwrap_or(false)));
         assert!(summary
             .groups
             .iter()
