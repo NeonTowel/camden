@@ -1,3 +1,4 @@
+use camden_core::ThreadingMode;
 use std::env;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -9,12 +10,6 @@ pub struct CliConfig {
     pub target: Option<PathBuf>,
     pub threading: ThreadingMode,
     pub extensions: Vec<String>,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum ThreadingMode {
-    Parallel,
-    Sequential,
 }
 
 #[derive(Debug, PartialEq, Eq)]

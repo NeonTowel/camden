@@ -20,7 +20,7 @@ tasks:
 
   build:
     env:
-      OPENCV_LINK_PATHS: "D:/vcpkg/installed/x64-windows-static-md/lib/"
+      OPENCV_LINK_PATHS: "D:/vcpkg/installed/x64-windows-static-md/lib"
       OPENCV_DIR: "D:/vcpkg/installed/x64-windows-static-md"
       VCPKGRS_TRIPLET: "x64-windows-static-md"
       VCPKGRS_DYNAMIC: "0"
@@ -35,7 +35,7 @@ tasks:
 
   check:
     env:
-      OPENCV_LINK_PATHS: "D:/vcpkg/installed/x64-windows-static-md/lib/"
+      OPENCV_LINK_PATHS: "D:/vcpkg/installed/x64-windows-static-md/lib"
       OPENCV_DIR: "D:/vcpkg/installed/x64-windows-static-md"
       VCPKGRS_TRIPLET: "x64-windows-static-md"
       VCPKGRS_DYNAMIC: "0"
@@ -43,3 +43,15 @@ tasks:
     cmds:
       - |
         cargo check
+
+  preview:
+    desc: Run the upcoming visual preview experience (scaffold placeholder)
+    env:
+      OPENCV_LINK_PATHS: "D:/vcpkg/installed/x64-windows-static-md/lib"
+      OPENCV_DIR: "D:/vcpkg/installed/x64-windows-static-md"
+      VCPKGRS_TRIPLET: "x64-windows-static-md"
+      VCPKGRS_DYNAMIC: "0"
+      VCPKG_ROOT: "D:/vcpkg"
+    cmds:
+      - |
+        pwsh -NoLogo -NoProfile -Command "if (Test-Path 'ui/previewer/src-tauri/Cargo.toml') { cargo tauri dev --manifest-path ui/previewer/src-tauri/Cargo.toml } else { Write-Host 'Preview UI not yet scaffolded. Create ui/previewer before running this task.' }"

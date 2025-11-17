@@ -1,4 +1,7 @@
-export OPENCV_LINK_PATHS="D:/vcpkg/installed/x64-windows-static-md/lib/"
+# Copy this file to `.envrc`, adjust the absolute paths if your vcpkg
+# installation lives elsewhere, and run `direnv allow` before invoking
+# any `task` commands.
+export OPENCV_LINK_PATHS="D:/vcpkg/installed/x64-windows-static-md/lib"
 export OPENCV_DIR="D:/vcpkg/installed/x64-windows-static-md"
 export VCPKGRS_TRIPLET="x64-windows-static-md"
 export VCPKGRS_DYNAMIC="0"

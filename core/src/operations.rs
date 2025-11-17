@@ -1,5 +1,5 @@
 use crate::progress;
-use crate::scanner::DuplicateMap;
+use crate::scanner::ScanSummary;
 use indicatif::ProgressBar;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -38,16 +38,17 @@ impl Error for MoveError {
 }
 
 pub fn move_duplicates(
-    checksum_map: &DuplicateMap,
+    summary: &ScanSummary,
     target_directory: &Path,
 ) -> Result<MoveStats, MoveError> {
-    let total = total_duplicates(checksum_map) as u64;
+    let total = total_duplicates(summary) as u64;
     let progress_bar = ProgressBar::new(total);
     progress_bar.set_style(progress::default_style());
 
     let mut moved = 0;
-    for files in checksum_map.values().filter(|files| files.len() > 1) {
-        for source in files.iter().skip(1) {
+    for group in summary.groups.iter().filter(|group| group.files.len() > 1) {
+        for entry in group.files.iter().skip(1) {
+            let source = &entry.path;
             let destination = resolve_destination(target_directory, source)?;
             fs::rename(source, &destination).map_err(|error| MoveError::Io {
                 source: error,
@@ -63,11 +64,10 @@ pub fn move_duplicates(
     Ok(MoveStats { moved })
 }
 
-fn total_duplicates(checksum_map: &DuplicateMap) -> usize {
-    checksum_map
-        .values()
-        .filter(|files| files.len() > 1)
-        .map(|files| files.len() - 1)
+fn total_duplicates(summary: &ScanSummary) -> usize {
+    summary
+        .duplicate_groups()
+        .map(|group| group.files.len() - 1)
         .sum()
 }
 
@@ -106,6 +106,7 @@ fn resolve_destination(target_directory: &Path, source: &Path) -> Result<PathBuf
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scanner::{DuplicateEntry, DuplicateGroup, ScanSummary};
     use std::fs;
     use tempfile::tempdir;
 
@@ -125,9 +126,17 @@ mod tests {
         fs::write(&other, b"same").unwrap();
         let existing = target_dir.path().join("dup.jpg");
         fs::write(&existing, b"existing").unwrap();
-        let mut map = DuplicateMap::default();
-        map.insert(1, vec![keep.clone(), nested.clone(), other.clone()]);
-        let stats = move_duplicates(&map, target_dir.path()).unwrap();
+        let summary = ScanSummary {
+            groups: vec![DuplicateGroup {
+                fingerprint: 1,
+                files: vec![
+                    sample_entry(keep.clone()),
+                    sample_entry(nested.clone()),
+                    sample_entry(other.clone()),
+                ],
+            }],
+        };
+        let stats = move_duplicates(&summary, target_dir.path()).unwrap();
         assert_eq!(stats.moved, 2);
         assert!(keep.exists());
         assert!(!nested.exists());
@@ -145,5 +154,17 @@ mod tests {
                 String::from("dup.jpg")
             ]
         );
+    }
+
+    fn sample_entry(path: PathBuf) -> DuplicateEntry {
+        DuplicateEntry {
+            path,
+            size_bytes: 4,
+            dimensions: (1, 1),
+            modified: None,
+            captured_at: None,
+            dominant_color: [0, 0, 0],
+            confidence: 1.0,
+        }
     }
 }

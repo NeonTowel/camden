@@ -1,9 +1,12 @@
+use kamadak_exif::{In, Reader, Tag};
 use opencv::core::{self, AlgorithmHint, Mat, MatTraitConst, MatTraitConstManual, Scalar, Size};
 use opencv::imgcodecs;
 use opencv::imgproc;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::fs::File;
 use std::path::{Path, PathBuf};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 const IMREAD_COLOR: i32 = imgcodecs::IMREAD_COLOR;
 const HASH_SIZE: i32 = 8;
@@ -44,7 +47,7 @@ impl DuplicateDetector {
     }
 
     /// Generates perceptual and feature fingerprints for the image at `path`.
-    pub fn analyze(&self, path: &Path) -> Result<ImageFeatures, DetectionError> {
+    pub fn analyze(&self, path: &Path) -> Result<ImageAnalysis, DetectionError> {
         let image = load_image(path)?;
         let mut grayscale = Mat::default();
         imgproc::cvt_color(
@@ -59,12 +62,16 @@ impl DuplicateDetector {
         let fingerprint = average_hash(&grayscale, path)?;
         let (mean, stddev) = channel_statistics(&image)?;
         let texture = texture_energy(&grayscale)?;
+        let metadata = file_metadata(path, &image, &mean)?;
 
-        Ok(ImageFeatures {
-            fingerprint,
-            mean,
-            stddev,
-            texture,
+        Ok(ImageAnalysis {
+            features: ImageFeatures {
+                fingerprint,
+                mean,
+                stddev,
+                texture,
+            },
+            metadata,
         })
     }
 
@@ -97,6 +104,22 @@ pub struct ImageFeatures {
     pub mean: [f64; 3],
     pub stddev: [f64; 3],
     pub texture: f64,
+}
+
+#[derive(Clone)]
+pub struct ImageMetadata {
+    pub size_bytes: u64,
+    pub dimensions: (i32, i32),
+    pub modified: Option<String>,
+    pub captured_at: Option<String>,
+    pub dominant_color: [u8; 3],
+    pub confidence: f32,
+}
+
+#[derive(Clone)]
+pub struct ImageAnalysis {
+    pub features: ImageFeatures,
+    pub metadata: ImageMetadata,
 }
 
 fn load_image(path: &Path) -> Result<Mat, DetectionError> {
@@ -192,6 +215,52 @@ fn vector_distance(left: &[f64; 3], right: &[f64; 3]) -> f64 {
     (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
+fn file_metadata(
+    path: &Path,
+    image: &Mat,
+    mean: &[f64; 3],
+) -> Result<ImageMetadata, DetectionError> {
+    let file_info = std::fs::metadata(path).map_err(|error| DetectionError::Io {
+        source: error,
+        path: path.to_path_buf(),
+    })?;
+
+    let size_bytes = file_info.len();
+    let modified = file_info
+        .modified()
+        .ok()
+        .and_then(|time| OffsetDateTime::from(time).format(&Rfc3339).ok());
+
+    let captured_at = read_exif_timestamp(path);
+
+    let dimensions = (image.cols(), image.rows());
+    let dominant_color = [
+        mean[2].clamp(0.0, 255.0) as u8,
+        mean[1].clamp(0.0, 255.0) as u8,
+        mean[0].clamp(0.0, 255.0) as u8,
+    ];
+
+    Ok(ImageMetadata {
+        size_bytes,
+        dimensions,
+        modified,
+        captured_at,
+        dominant_color,
+        confidence: 1.0,
+    })
+}
+
+fn read_exif_timestamp(path: &Path) -> Option<String> {
+    let file = File::open(path).ok()?;
+    let mut buffer = std::io::BufReader::new(file);
+    let exif_reader = Reader::new();
+    let exif = exif_reader.read_from_container(&mut buffer).ok()?;
+    let field = exif
+        .get_field(Tag::DateTimeOriginal, In::PRIMARY)
+        .or_else(|| exif.get_field(Tag::DateTimeDigitized, In::PRIMARY))?;
+    Some(field.display_value().to_string())
+}
+
 /// Errors that can occur during duplicate detection.
 #[derive(Debug)]
 pub enum DetectionError {
@@ -200,6 +269,10 @@ pub enum DetectionError {
     UnexpectedHashLength {
         expected: usize,
         actual: usize,
+        path: PathBuf,
+    },
+    Io {
+        source: std::io::Error,
         path: PathBuf,
     },
     OpenCv(opencv::Error),
@@ -225,6 +298,7 @@ impl Display for DetectionError {
                 expected,
                 actual
             ),
+            Self::Io { source, path } => write!(f, "io error for {}: {}", path.display(), source),
             Self::OpenCv(error) => write!(f, "opencv error: {}", error),
         }
     }
@@ -234,6 +308,7 @@ impl Error for DetectionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::OpenCv(error) => Some(error),
+            Self::Io { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -267,7 +342,9 @@ mod tests {
         let detector = DuplicateDetector::default();
         let left = detector.analyze(&first).unwrap();
         let right = detector.analyze(&second).unwrap();
-        assert!(detector.is_similar(&left, &right));
+        assert!(detector.is_similar(&left.features, &right.features));
+        assert!(left.metadata.size_bytes > 0);
+        assert_eq!(left.metadata.dimensions, (128, 128));
     }
 
     #[test]
@@ -281,7 +358,7 @@ mod tests {
         let detector = DuplicateDetector::default();
         let left = detector.analyze(&first).unwrap();
         let right = detector.analyze(&second).unwrap();
-        assert!(!detector.is_similar(&left, &right));
+        assert!(!detector.is_similar(&left.features, &right.features));
     }
 
     fn write_pattern(path: &Path, offset: i32) {
