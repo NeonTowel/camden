@@ -43,7 +43,11 @@ impl ThumbnailCache {
         source: &Path,
         fingerprint: Fingerprint,
     ) -> Result<PathBuf, ThumbnailError> {
-        let target = self.root.join(format!("{:016x}.webp", fingerprint));
+        let target = self.root.join(format!("{:016x}.png", fingerprint));
+        let legacy = self.root.join(format!("{:016x}.webp", fingerprint));
+        if legacy.exists() {
+            let _ = fs::remove_file(&legacy);
+        }
         if target.exists() {
             return Ok(target);
         }

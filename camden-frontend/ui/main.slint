@@ -1,0 +1,188 @@
+import { Button, LineEdit, ScrollView, ListView } from "std-widgets.slint";
+
+export struct FileData {
+    display_name: string,
+    info: string,
+    selected: bool,
+    thumbnail: image,
+}
+
+export struct GroupData {
+    fingerprint: string,
+    file_count: int,
+    files: [FileData],
+}
+
+export component MainWindow inherits Window {
+    width: 1024px;
+    height: 760px;
+    title: "Camden Preview (Slint)";
+
+    in-out property <string> root_path: "";
+    in-out property <string> target_path: "";
+    in-out property <string> status_text: "";
+    in-out property <[GroupData]> groups: [];
+    in-out property <bool> scanning: false;
+    in-out property <float> progress_phase: 0.0;
+
+    callback browse_root();
+    callback browse_target();
+    callback scan_requested();
+    callback file_toggled(int, int);
+    callback move_requested();
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            LineEdit {
+                placeholder-text: "Select root directory…";
+                text <=> root_path;
+                horizontal-stretch: 1.0;
+                enabled: !scanning;
+            }
+
+            Button {
+                text: "Browse";
+                clicked => { browse_root(); }
+                enabled: !scanning;
+            }
+
+            Button {
+                text: "Scan";
+                clicked => { scan_requested(); }
+                enabled: !scanning;
+            }
+
+    Timer {
+        interval: 24ms;
+        running: scanning;
+        triggered => {
+            progress_phase = progress_phase + 0.02;
+            if progress_phase > 1.0 {
+                progress_phase = 0.0;
+            }
+        }
+    }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            LineEdit {
+                placeholder-text: "Target directory for moved duplicates…";
+                text <=> target_path;
+                horizontal-stretch: 1.0;
+                enabled: !scanning;
+            }
+
+            Button {
+                text: "Browse";
+                clicked => { browse_target(); }
+                enabled: !scanning;
+            }
+
+            Button {
+                text: "Move Selected";
+                clicked => { move_requested(); }
+                enabled: !scanning;
+            }
+        }
+
+        Rectangle {
+            visible: scanning;
+            width: 100%;
+            height: 10px;
+            border-radius: 5px;
+            background: #d9e2ec;
+            clip: true;
+
+            Rectangle {
+                width: parent.width * 0.28;
+                height: parent.height;
+                x: (parent.width + self.width) * progress_phase - self.width;
+                background: #2c3e50;
+                opacity: 0.85;
+            }
+        }
+
+        Text {
+            visible: !scanning;
+            text: status_text;
+            font-size: 12pt;
+            color: #2c3e50;
+        }
+
+        Rectangle {
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #cccccc;
+            clip: true;
+
+            ScrollView {
+                ListView {
+                    for group[group_index] in groups : Rectangle {
+                        border-width: 0px;
+
+                        VerticalLayout {
+                            padding: 8px;
+                            spacing: 6px;
+
+                            Text {
+                                text: "Fingerprint: " + group.fingerprint + " (" + group.file_count + " files)";
+                                font-weight: 600;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 12px;
+
+                                for file[file_index] in group.files : Rectangle {
+                                    width: 160px;
+                                    height: 200px;
+                                    border-width: 1px;
+                                    border-color: file.selected ? #10893e : #cccccc;
+                                    border-radius: 8px;
+
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        spacing: 6px;
+
+                                        Image {
+                                            source: file.thumbnail;
+                                            height: 110px;
+                                            horizontal-stretch: 1.0;
+                                            image-fit: contain;
+                                        }
+
+                                        Text {
+                                            text: file.display_name;
+                                            font-weight: 600;
+                                        }
+
+                                        Text {
+                                            text: file.info;
+                                            wrap: word-wrap;
+                                            font-size: 9pt;
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        width: 100%;
+                                        height: 100%;
+                                        clicked => { file_toggled(group_index, file_index); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+
+}
+

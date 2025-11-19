@@ -287,22 +287,20 @@ struct AnalyzedFile {
 mod tests {
     use super::*;
     use indicatif::ProgressBar;
-    use opencv::core::{self, Scalar};
+    use opencv::core::{self, Scalar, Vector};
     use opencv::imgcodecs;
-    use opencv::prelude::*;
-    use opencv::types::VectorOfi32;
     use std::sync::Arc;
     use tempfile::tempdir;
 
     fn write_image(path: &Path, color: u8) {
-        let mut image = core::Mat::new_rows_cols_with_default(
+        let image = core::Mat::new_rows_cols_with_default(
             64,
             64,
             core::CV_8UC3,
             Scalar::from((color as f64, color as f64, color as f64, 0.0)),
         )
         .unwrap();
-        let params = VectorOfi32::new();
+        let params = Vector::<i32>::new();
         imgcodecs::imwrite(path.to_string_lossy().as_ref(), &image, &params).unwrap();
     }
 

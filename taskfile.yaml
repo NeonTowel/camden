@@ -1,57 +1,42 @@
 version: 3
+
+dotenv: ['.env']
+
 tasks:
   default:
     - task --list-all
 
   deps:
-    - task: install-opencv
     - scoop install llvm cmake vcpkg
+    - task: install-opencv
 
   install-opencv:
-    env:
-      VCPKG_ROOT: "$HOME/scoop/apps/vcpkg/current"
-      VCPKGS_TARGET_TRIPLET: x64-windows-static-release
-      VCPKGS_HOST_TRIPLET: x64-windows-static-release
-      OPENCV_STATIC: 1
     cmds:
-    #- vcpkg install opencv4[contrib,nonfree] --triplet x64-windows-static-release
     - vcpkg install opencv4[contrib,nonfree]:x64-windows-static
     - vcpkg integrate install
 
   build:
-    env:
-      OPENCV_LINK_PATHS: "D:/vcpkg/installed/x64-windows-static-md/lib"
-      OPENCV_DIR: "D:/vcpkg/installed/x64-windows-static-md"
-      VCPKGRS_TRIPLET: "x64-windows-static-md"
-      VCPKGRS_DYNAMIC: "0"
-      VCPKG_ROOT: "D:/vcpkg"
     cmds:
-      - |
-        d:/vcpkg/vcpkg.exe install opencv4:x64-windows-static-md
-      - |
-        echo OPENCV_LINK_PATHS: $OPENCV_LINK_PATHS
-        echo OPENCV_DIR: $OPENCV_DIR
-        cargo build
+      - cargo build --workspace
 
   check:
-    env:
-      OPENCV_LINK_PATHS: "D:/vcpkg/installed/x64-windows-static-md/lib"
-      OPENCV_DIR: "D:/vcpkg/installed/x64-windows-static-md"
-      VCPKGRS_TRIPLET: "x64-windows-static-md"
-      VCPKGRS_DYNAMIC: "0"
-      VCPKG_ROOT: "D:/vcpkg"
     cmds:
-      - |
-        cargo check
+      - cargo check --workspace --all-targets
 
-  preview:
-    desc: Run the upcoming visual preview experience (scaffold placeholder)
-    env:
-      OPENCV_LINK_PATHS: "D:/vcpkg/installed/x64-windows-static-md/lib"
-      OPENCV_DIR: "D:/vcpkg/installed/x64-windows-static-md"
-      VCPKGRS_TRIPLET: "x64-windows-static-md"
-      VCPKGRS_DYNAMIC: "0"
-      VCPKG_ROOT: "D:/vcpkg"
+  fmt:
+    cmds:
+      - cargo fmt --all
+
+  test:
+    cmds:
+      - cargo test --workspace --all-targets
+
+  frontend:
+    desc: Run the Slint frontend application
     cmds:
       - |
-        pwsh -NoLogo -NoProfile -Command "if (Test-Path 'ui/previewer/src-tauri/Cargo.toml') { cargo tauri dev --manifest-path ui/previewer/src-tauri/Cargo.toml } else { Write-Host 'Preview UI not yet scaffolded. Create ui/previewer before running this task.' }"
+        pwsh -NoLogo -NoProfile -Command "cargo run -p camden-frontend"
+
+  release:
+    cmds:
+      - cargo build --workspace --release

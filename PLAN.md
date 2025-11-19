@@ -51,45 +51,42 @@ Deliver a Windows-first visual review experience for Camden that showcases dupli
 3. Specify IPC payloads for the UI (e.g., `load_groups`, `toggle_selection`, `commit_move`).
 4. Document the contract in `docs/api-preview.md`.
 
-## Phase 5 — Tauri + React App Scaffold (Windows focus)
+## Phase 5 — Slint Frontend Scaffold (Windows focus)
 
-1. Generate a new Tauri app under `ui/previewer` using React + TypeScript + Tailwind.
-2. Configure Vite dev server, Prettier, ESLint, and include `task preview` to run `cargo tauri dev`.
-3. Implement Rust-side Tauri commands that wrap `camden-core` functions (load snapshot, stream progress, execute moves).
-4. Add smoke tests for commands (`cargo test -p previewer`).
+1. Add a new `camden-frontend` crate to the workspace that depends on `camden-core` and `slint`.
+2. Create initial `.slint` markup defining the app shell (window, root selection controls, placeholder list).
+3. Provide a `task frontend` (or similar) that runs `cargo run -p camden-frontend`.
+4. Document development workflow for the Slint UI in `docs/frontend.md`.
 
-## Phase 6 — UI Implementation
+## Phase 6 — Slint UI Implementation
 
 1. Layout:
-   - Header: root path, target selector, progress pills.
-   - Masonry grid: cards per group with horizontal scroller of thumbnails.
-   - Detail drawer: zoomable preview, metadata grid, selection toggles.
-   - Footer: action buttons (`Move selected`, `Skip`, `Mark all safe`).
-2. Build components with Tailwind + Framer Motion:
-   - Responsive (min 1280px width target, degrade gracefully on smaller screens).
-   - Lightweight glassmorphism accents, Fluent-inspired shadows.
-3. Integrate state management (TanStack Query or Zustand) to handle snapshot loading, selection state, and command calls.
-4. Implement optimistic updates and skeleton loaders for fluid UX.
+   - Header: root chooser, target directory, scan button, status text.
+   - Split view: left pane lists duplicate groups; right pane shows thumbnails + metadata.
+   - Footer: action buttons (`Move selected`, `Open in Explorer`, etc.).
+2. Bind Slint models to `ScanSummary` data structures (converted into Slint-friendly arrays/structs).
+3. Load thumbnail images from the cache and display them with fallback placeholders.
+4. Ensure the UI remains responsive by running scans and file operations on background threads and updating the model via the Slint event loop.
 
 ## Phase 7 — Selection & Move Flow
 
-1. Track selections per group; surface counts in header/footer.
-2. Provide keyboard shortcuts (arrow nav, space to toggle) and context menu actions.
-3. Hook “Move selected” to background Rust command that reuses `move_duplicates` behaviour (with progress events).
-4. Show progress modal with streaming updates; write post-move summary to disk.
+1. Track per-file selection state inside Slint models; surface counts in header/footer.
+2. Implement keyboard shortcuts (arrow navigation, space to toggle selection, enter to open detail).
+3. Hook “Move selected” to `camden_core::move_paths`, streaming progress back to the UI.
+4. Provide success/error notifications and write a post-move summary.
 
 ## Phase 8 — Polish & QA
 
-1. Add filtering controls (file type pill chips, confidence slider, size range).
-2. Provide quick metadata badges (dimensions, size, modified time) on card faces.
-3. Implement error handling UX (e.g., thumbnail failures, permission issues) with retry options.
-4. Write end-to-end instructions in `docs/preview-workflow.md`.
-5. Capture follow-up tasks for cross-platform support and advanced dedupe heuristics.
+1. Add filters (file type chips, confidence slider, size range) with live model updates.
+2. Surface key metadata (dimensions, captured time, size) directly in the list items or detail pane.
+3. Harden error handling (thumbnail load failures, IO errors) with retry/skip options.
+4. Capture screenshots, usage docs, and troubleshooting notes for the Slint UI.
+5. Identify follow-up work for macOS/Linux parity or alternate frontends if needed.
 
 ## Acceptance Criteria
 
 - `task check` continues to pass across all phases, ensuring the Rust core remains buildable.
-- `task preview` launches the Tauri app, loads cached scan data, and renders duplicate groups with smooth interaction.
+- `task frontend` (or equivalent) launches the Slint application, loads cached scan data, and renders duplicate groups with smooth interaction.
 - Users can visually inspect groups, toggle selections, and relocate chosen files through the UI, with observable progress feedback and resulting filesystem changes.
 - Documentation reflects setup, development workflow, and troubleshooting steps for the preview feature.
 

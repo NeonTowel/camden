@@ -1,0 +1,14 @@
+[package]
+name = "camden-frontend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+camden-core = { path = "../core" }
+slint = { version = "1.5", features = ["renderer-software"] }
+indicatif = "0.17"
+dirs = "5"
+rfd = "0.14"
+
+[build-dependencies]
+slint-build = "1.5"

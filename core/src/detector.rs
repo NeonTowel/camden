@@ -325,11 +325,9 @@ impl From<opencv::Error> for DetectionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opencv::core::{self, Rect, Scalar};
+    use opencv::core::{self, Rect, Scalar, Vector};
     use opencv::imgcodecs;
     use opencv::imgproc;
-    use opencv::prelude::*;
-    use opencv::types::VectorOfi32;
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -374,7 +372,7 @@ mod tests {
         let color = Scalar::from((255.0, 255.0, 255.0, 0.0));
         let rect = Rect::new(32 + offset, 32, 48, 48);
         imgproc::rectangle(&mut image, rect, color, imgproc::FILLED, imgproc::LINE_8, 0).unwrap();
-        let params = VectorOfi32::new();
+        let params = Vector::<i32>::new();
         imgcodecs::imwrite(path.to_string_lossy().as_ref(), &image, &params).unwrap();
     }
 
@@ -389,7 +387,7 @@ mod tests {
         let color = Scalar::from((0.0, 0.0, 0.0, 0.0));
         let rect = Rect::new(16, 16, 96, 96);
         imgproc::rectangle(&mut image, rect, color, imgproc::FILLED, imgproc::LINE_8, 0).unwrap();
-        let params = VectorOfi32::new();
+        let params = Vector::<i32>::new();
         imgcodecs::imwrite(path.to_string_lossy().as_ref(), &image, &params).unwrap();
     }
 }

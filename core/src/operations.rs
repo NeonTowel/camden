@@ -1,11 +1,13 @@
 use crate::progress;
 use crate::scanner::ScanSummary;
 use indicatif::ProgressBar;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MoveStats {
     pub moved: usize,
 }
@@ -61,6 +63,24 @@ pub fn move_duplicates(
     }
 
     progress_bar.finish_with_message("File moving complete");
+    Ok(MoveStats { moved })
+}
+
+pub fn move_paths(paths: &[PathBuf], target_directory: &Path) -> Result<MoveStats, MoveError> {
+    fs::create_dir_all(target_directory).map_err(|source| MoveError::Io {
+        source,
+        path: target_directory.to_path_buf(),
+    })?;
+
+    let mut moved = 0;
+    for source in paths {
+        let destination = resolve_destination(target_directory, source)?;
+        fs::rename(source, &destination).map_err(|error| MoveError::Io {
+            source: error,
+            path: source.clone(),
+        })?;
+        moved += 1;
+    }
     Ok(MoveStats { moved })
 }
 
@@ -154,6 +174,23 @@ mod tests {
                 String::from("dup.jpg")
             ]
         );
+    }
+
+    #[test]
+    fn move_paths_transfers_files() {
+        let source_dir = tempdir().unwrap();
+        let target_dir = tempdir().unwrap();
+        let first = source_dir.path().join("first.jpg");
+        let second = source_dir.path().join("second.jpg");
+        fs::write(&first, b"first").unwrap();
+        fs::write(&second, b"second").unwrap();
+
+        let stats = move_paths(&[first.clone(), second.clone()], target_dir.path()).unwrap();
+        assert_eq!(stats.moved, 2);
+        assert!(!first.exists());
+        assert!(!second.exists());
+        assert!(target_dir.path().join("first.jpg").exists());
+        assert!(target_dir.path().join("second.jpg").exists());
     }
 
     fn sample_entry(path: PathBuf) -> DuplicateEntry {

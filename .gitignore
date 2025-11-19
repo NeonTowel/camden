@@ -1,5 +1,6 @@
 /target
 .idea.envrc
 .envrc
+.env
 vcpkg_installed
 identical_files.json

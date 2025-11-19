@@ -1,0 +1,7 @@
+---
+description: Always prefer Taskfile commands so dotenv-provided environment variables (e.g. OpenCV paths) are loaded correctly.
+
+rules:
+  - When running builds, checks, tests, formatting, or project-specific tooling, invoke the corresponding `task` targets (e.g. `task build`, `task check`, `task test`, `task fmt`, `task frontend`) instead of calling `cargo`, `bun`, or other binaries directly. This ensures the `.env` configuration is respected.
+  - Only fall back to direct `cargo`/`bun` commands if the Taskfile explicitly lacks the required operation and after confirming with the user.
+  - Mention the appropriate task command in responses so the workflow remains consistent across environments.
