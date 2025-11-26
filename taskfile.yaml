@@ -37,7 +37,7 @@ tasks:
         export PATH="$HOME\\scoop\\apps\\llvm\\current\\bin;$PATH"
         export PATH="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\bin;$PATH"
         export OPENCV_LINK_PATHS="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\lib"
-        export OPENCV_LINK_LIBS="opencv_world412"
+        export OPENCV_LINK_LIBS="opencv_world4120"
         export OPENCV_INCLUDE_PATHS="$PWD\\.vendor\\opencv\\build\\include"
         cargo build --workspace
 
@@ -60,5 +60,12 @@ tasks:
         pwsh -NoLogo -NoProfile -Command "cargo run -p camden-frontend"
 
   release:
+    silent: true
     cmds:
-      - cargo build --workspace --release
+      - |
+        export PATH="$HOME\\scoop\\apps\\llvm\\current\\bin;$PATH"
+        export PATH="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\bin;$PATH"
+        export OPENCV_LINK_PATHS="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\lib"
+        export OPENCV_LINK_LIBS="opencv_world4120"
+        export OPENCV_INCLUDE_PATHS="$PWD\\.vendor\\opencv\\build\\include"
+        cargo build --workspace --release
