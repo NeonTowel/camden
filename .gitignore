@@ -2,5 +2,6 @@
 .idea.envrc
 .envrc
 .env
+.vendor
 vcpkg_installed
 identical_files.json

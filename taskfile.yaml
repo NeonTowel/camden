@@ -1,23 +1,45 @@
 version: 3
 
-dotenv: ['.env']
+#dotenv: ['.env']
 
 tasks:
   default:
     - task --list-all
 
   deps:
-    - scoop install llvm cmake vcpkg
+    - scoop install llvm #cmake vcpkg
     - task: install-opencv
 
   install-opencv:
+    vars:
+      OPENCV_VERSION: 4.12.0
     cmds:
-    - vcpkg install opencv4[contrib,nonfree]:x64-windows-static
-    - vcpkg integrate install
+      - |
+        if [ -d ".vendor/opencv" ]; then
+          echo "OpenCV is already installed in local vendor directory."
+        else
+          echo "Downloading OpenCV {{.OPENCV_VERSION}}..."
+          curl --ssl-no-revoke -L -o opencv.exe "https://github.com/opencv/opencv/releases/download/{{.OPENCV_VERSION}}/opencv-{{.OPENCV_VERSION}}-windows.exe"
+          
+          echo "Extracting OpenCV..."
+          mkdir -p .vendor
+          # The exe is a 7zip self-extracting archive. -y assumes yes, -o specifies output dir.
+          ./opencv.exe -y -o.vendor
+          
+          rm opencv.exe
+          echo "OpenCV setup complete."
+        fi
 
   build:
+    silent: true
     cmds:
-      - cargo build --workspace
+      - |
+        export PATH="$HOME\\scoop\\apps\\llvm\\current\\bin;$PATH"
+        export PATH="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\bin;$PATH"
+        export OPENCV_LINK_PATHS="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\lib"
+        export OPENCV_LINK_LIBS="opencv_world412"
+        export OPENCV_INCLUDE_PATHS="$PWD\\.vendor\\opencv\\build\\include"
+        cargo build --workspace
 
   check:
     cmds:
