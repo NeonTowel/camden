@@ -30,6 +30,43 @@ tasks:
           echo "OpenCV setup complete."
         fi
 
+  install-vcpkg:
+    cmds:
+      - |
+        if [ -d ".vendor/vcpkg" ]; then
+          echo "vcpkg is already installed."
+        else
+          echo "Cloning vcpkg..."
+          mkdir -p .vendor
+          git clone https://github.com/microsoft/vcpkg .vendor/vcpkg
+          echo "Bootstrapping vcpkg..."
+          cd .vendor/vcpkg && ./bootstrap-vcpkg.bat
+        fi
+
+  install-opencv-static:
+    deps: [install-vcpkg]
+    cmds:
+      - |
+        echo "Installing static OpenCV..."
+        cd .vendor/vcpkg && ./vcpkg install opencv:x64-windows-static
+
+  build-static:
+    desc: Build with static OpenCV (using local vcpkg)
+    silent: true
+    cmds:
+      - |
+        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
+        # Unset dynamic linking vars to avoid conflicts
+        unset OPENCV_LINK_PATHS
+        unset OPENCV_LINK_LIBS
+        unset OPENCV_INCLUDE_PATHS
+        
+        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
+        # We can pass rustflags via environment variable
+        export RUSTFLAGS="-C target-feature=+crt-static"
+        
+        cargo build --workspace --release
+
   build:
     silent: true
     cmds:
