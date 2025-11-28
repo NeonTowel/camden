@@ -50,34 +50,6 @@ tasks:
         echo "Installing static OpenCV..."
         cd .vendor/vcpkg && ./vcpkg install opencv:x64-windows-static
 
-  build-static:
-    desc: Build with static OpenCV (using local vcpkg)
-    silent: true
-    cmds:
-      - |
-        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
-        # Unset dynamic linking vars to avoid conflicts
-        unset OPENCV_LINK_PATHS
-        unset OPENCV_LINK_LIBS
-        unset OPENCV_INCLUDE_PATHS
-        
-        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
-        # We can pass rustflags via environment variable
-        export RUSTFLAGS="-C target-feature=+crt-static"
-        
-        cargo build --workspace --release
-
-  build:
-    silent: true
-    cmds:
-      - |
-        export PATH="$HOME\\scoop\\apps\\llvm\\current\\bin;$PATH"
-        export PATH="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\bin;$PATH"
-        export OPENCV_LINK_PATHS="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\lib"
-        export OPENCV_LINK_LIBS="opencv_world4120"
-        export OPENCV_INCLUDE_PATHS="$PWD\\.vendor\\opencv\\build\\include"
-        cargo build --workspace
-
   check:
     cmds:
       - cargo check --workspace --all-targets
@@ -94,15 +66,48 @@ tasks:
     desc: Run the Slint frontend application
     cmds:
       - |
-        pwsh -NoLogo -NoProfile -Command "cargo run -p camden-frontend"
+        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
+        # Unset dynamic linking vars to avoid conflicts
+        unset OPENCV_LINK_PATHS
+        unset OPENCV_LINK_LIBS
+        unset OPENCV_INCLUDE_PATHS
+        
+        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
+        # We can pass rustflags via environment variable
+        export RUSTFLAGS="-C target-feature=+crt-static"
 
-  release:
+        cargo run -p camden-frontend
+
+  build:
+    desc: Build with static OpenCV (using local vcpkg)
     silent: true
     cmds:
       - |
-        export PATH="$HOME\\scoop\\apps\\llvm\\current\\bin;$PATH"
-        export PATH="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\bin;$PATH"
-        export OPENCV_LINK_PATHS="$PWD\\.vendor\\opencv\\build\\x64\\vc16\\lib"
-        export OPENCV_LINK_LIBS="opencv_world4120"
-        export OPENCV_INCLUDE_PATHS="$PWD\\.vendor\\opencv\\build\\include"
+        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
+        # Unset dynamic linking vars to avoid conflicts
+        unset OPENCV_LINK_PATHS
+        unset OPENCV_LINK_LIBS
+        unset OPENCV_INCLUDE_PATHS
+        
+        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
+        # We can pass rustflags via environment variable
+        export RUSTFLAGS="-C target-feature=+crt-static"
+        
+        cargo build --workspace
+
+  release:
+    desc: Release build with static OpenCV (using local vcpkg)
+    silent: true
+    cmds:
+      - |
+        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
+        # Unset dynamic linking vars to avoid conflicts
+        unset OPENCV_LINK_PATHS
+        unset OPENCV_LINK_LIBS
+        unset OPENCV_INCLUDE_PATHS
+        
+        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
+        # We can pass rustflags via environment variable
+        export RUSTFLAGS="-C target-feature=+crt-static"
+        
         cargo build --workspace --release

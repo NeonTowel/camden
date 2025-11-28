@@ -20,6 +20,7 @@ struct InternalFile {
     display_name: String,
     info: String,
     size_bytes: u64,
+    sort_date: Option<String>,
     selected: bool,
     thumbnail: Option<PathBuf>,
 }
@@ -30,10 +31,13 @@ struct InternalGroup {
     files: Vec<InternalFile>,
 }
 
+use std::time::Instant;
+
 #[derive(Default, Clone)]
 struct AppState {
     groups: Vec<InternalGroup>,
     scanning: bool,
+    last_scan_duration: Option<std::time::Duration>,
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -64,6 +68,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 if let Ok(mut state_mut) = state.lock() {
                     state_mut.scanning = true;
+                    state_mut.last_scan_duration = None;
                 }
                 ui.set_scanning(true);
                 ui.set_progress_phase(0.0);
@@ -179,17 +184,21 @@ fn perform_scan(
     state: Arc<Mutex<AppState>>,
     ui_weak: slint::Weak<MainWindow>,
 ) {
+    let start_time = Instant::now();
     let progress_bar = Arc::new(ProgressBar::hidden());
     let summary = scan(&root, &config, &progress_bar);
     let groups = map_summary(&summary);
+    let duration = start_time.elapsed();
 
     if let Ok(mut state_mut) = state.lock() {
         state_mut.groups = groups;
         state_mut.scanning = false;
+        state_mut.last_scan_duration = Some(duration);
     }
 
     let status = format!(
-        "Scan complete: {} duplicate groups, {} files.",
+        "Scan complete in {:.2}s: {} duplicate groups, {} files.",
+        duration.as_secs_f64(),
         summary.duplicate_groups().count(),
         summary
             .duplicate_groups()
@@ -301,25 +310,10 @@ fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {
         .duplicate_groups()
         .map(|group| {
             let fingerprint = format!("{:016x}", group.fingerprint);
-            let max_size = group
+            let mut files: Vec<InternalFile> = group
                 .files
                 .iter()
-                .map(|file| file.size_bytes)
-                .max()
-                .unwrap_or(0);
-            let keep_index = group
-                .files
-                .iter()
-                .enumerate()
-                .filter(|(_, file)| file.size_bytes == max_size)
-                .min_by_key(|(_, file)| file.path.to_string_lossy().to_string())
-                .map(|(index, _)| index)
-                .unwrap_or(0);
-            let files = group
-                .files
-                .iter()
-                .enumerate()
-                .map(|(index, file)| {
+                .map(|file| {
                     let display_name = file
                         .path
                         .file_name()
@@ -327,50 +321,152 @@ fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {
                         .unwrap_or("unknown")
                         .to_string();
                     let info = format_file_info(file);
+                    let sort_date = file.captured_at.clone().or_else(|| file.modified.clone());
+
                     InternalFile {
                         path: file.path.clone(),
                         display_name,
                         info,
                         size_bytes: file.size_bytes,
-                        selected: file.size_bytes == max_size && index != keep_index,
+                        sort_date,
+                        selected: false,
                         thumbnail: file.thumbnail.clone(),
                     }
                 })
                 .collect();
+
+            let keep_index = find_keep_index(&files);
+
+            for (index, file) in files.iter_mut().enumerate() {
+                file.selected = index != keep_index;
+            }
 
             InternalGroup { fingerprint, files }
         })
         .collect()
 }
 
+fn find_keep_index(files: &[InternalFile]) -> usize {
+    if files.is_empty() {
+        return 0;
+    }
+
+    let max_size = files.iter().map(|f| f.size_bytes).max().unwrap_or(0);
+
+    files
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.size_bytes == max_size)
+        .max_by(|(_, a), (_, b)| {
+            let date_cmp = a.sort_date.cmp(&b.sort_date);
+            if date_cmp != std::cmp::Ordering::Equal {
+                return date_cmp;
+            }
+            b.path.cmp(&a.path)
+        })
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn make_file(name: &str, size: u64, date: Option<&str>) -> InternalFile {
+        InternalFile {
+            path: PathBuf::from(name),
+            display_name: name.to_string(),
+            info: String::new(),
+            size_bytes: size,
+            sort_date: date.map(|s| s.to_string()),
+            selected: false,
+            thumbnail: None,
+        }
+    }
+
+    #[test]
+    fn keep_largest() {
+        let files = vec![
+            make_file("small.jpg", 100, Some("2023-01-01")),
+            make_file("large.jpg", 200, Some("2023-01-01")),
+        ];
+        assert_eq!(find_keep_index(&files), 1);
+    }
+
+    #[test]
+    fn keep_newest_when_size_same() {
+        let files = vec![
+            make_file("old.jpg", 100, Some("2023-01-01")),
+            make_file("new.jpg", 100, Some("2023-01-02")),
+        ];
+        assert_eq!(find_keep_index(&files), 1);
+    }
+
+    #[test]
+    fn keep_alphabetical_when_size_and_date_same() {
+        // "b.jpg" should be kept because we use b.path.cmp(&a.path) which is reverse lexical sort?
+        // Wait, the logic is `b.path.cmp(&a.path)`.
+        // If a="a.jpg", b="b.jpg".
+        // a.cmp(b) is Less. b.cmp(a) is Greater.
+        // max_by will pick the one that is Greater.
+        // So "b.jpg" > "a.jpg" in string comparison? Yes.
+        // So b.path.cmp(&a.path):
+        // compare(current_max, candidate).
+        // if candidate > current_max, candidate becomes max.
+        // Let's trace.
+        // Logic: .max_by(|(_, a), (_, b)| ... b.path.cmp(&a.path))
+        // This is tricky. max_by returns the element that yields Ordering::Greater when compared to others.
+        // The closure compares `a` (left) and `b` (right).
+        // If we want "a" to be "greater" (selected) than "b", we should return Greater.
+        // We want stable sort order? Usually "path" tiebreaker is purely deterministic.
+        // Let's assume we want "first" file alphabetically if all else equal?
+        // If we want "a.jpg" to be kept over "b.jpg", "a" should be "better".
+        // If b.path.cmp(&a.path) is used:
+        // "a.jpg" vs "b.jpg" -> "b".cmp("a") -> Greater. So "a" is Greater than "b"? No.
+        // max_by(cmp): if cmp(a, b) == Greater, a is max.
+        // cmp("a", "b") -> "b".cmp("a") -> Greater.
+        // So "a" is considered "greater" (better) than "b".
+        // So "a.jpg" should be kept.
+        // Let's test this assumption.
+
+        let files = vec![
+            make_file("a.jpg", 100, Some("2023-01-01")),
+            make_file("b.jpg", 100, Some("2023-01-01")),
+        ];
+        assert_eq!(find_keep_index(&files), 0); // a.jpg
+    }
+
+    #[test]
+    fn keep_largest_ignores_date() {
+        let files = vec![
+            make_file("small_new.jpg", 100, Some("2023-01-02")),
+            make_file("large_old.jpg", 200, Some("2023-01-01")),
+        ];
+        assert_eq!(find_keep_index(&files), 1);
+    }
+
+    #[test]
+    fn handle_missing_dates() {
+        let files = vec![
+            make_file("no_date.jpg", 100, None),
+            make_file("with_date.jpg", 100, Some("2023-01-01")),
+        ];
+        // Some("...") > None is true for Option.
+        // So with_date should be kept.
+        assert_eq!(find_keep_index(&files), 1);
+    }
+}
+
+
 fn ensure_largest_selected(groups: &mut [InternalGroup]) {
     for group in groups.iter_mut() {
         if group.files.is_empty() {
             continue;
         }
-        let max_size = group
-            .files
-            .iter()
-            .map(|file| file.size_bytes)
-            .max()
-            .unwrap_or(0);
-        let keep_index = group
-            .files
-            .iter()
-            .enumerate()
-            .find(|(_, file)| file.size_bytes == max_size && !file.selected)
-            .map(|(index, _)| index)
-            .or_else(|| {
-                group
-                    .files
-                    .iter()
-                    .enumerate()
-                    .find(|(_, file)| file.size_bytes == max_size)
-                    .map(|(index, _)| index)
-            })
-            .unwrap_or(0);
+        let keep_index = find_keep_index(&group.files);
         for (index, file) in group.files.iter_mut().enumerate() {
-            file.selected = file.size_bytes == max_size && index != keep_index;
+            file.selected = index != keep_index;
         }
     }
 }
@@ -416,9 +512,16 @@ fn format_status(state: &AppState) -> String {
         file_count += group.files.len();
         selected_count += group.files.iter().filter(|file| file.selected).count();
     }
+    
+    let time_info = if let Some(d) = state.last_scan_duration {
+        format!(" • Time: {:.2}s", d.as_secs_f64())
+    } else {
+        String::new()
+    };
+
     format!(
-        "Groups: {} • Files: {} • Selected: {}",
-        group_count, file_count, selected_count
+        "Groups: {} • Files: {} • Selected: {}{}",
+        group_count, file_count, selected_count, time_info
     )
 }
 
@@ -494,3 +597,4 @@ fn load_thumbnail(path: &Path) -> Option<Image> {
         None
     })
 }
+

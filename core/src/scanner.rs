@@ -87,6 +87,7 @@ pub fn scan(root: &Path, config: &ScanConfig, progress_bar: &Arc<ProgressBar>) -
     let cache = ThumbnailCache::new(config.thumbnail_cache_root.clone())
         .ok()
         .map(Arc::new);
+
     let groups = match config.threading {
         ThreadingMode::Parallel => scan_parallel(root, config, progress_bar, &detector, &cache),
         ThreadingMode::Sequential => scan_sequential(root, config, progress_bar, &detector, &cache),
