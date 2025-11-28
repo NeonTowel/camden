@@ -121,6 +121,7 @@ mod tests {
                     dominant_color: [10, 20, 30],
                     confidence: 0.9,
                     thumbnail: None,
+                    resolution_tier: crate::resolution::ResolutionTier::High,
                 }],
             }],
         };

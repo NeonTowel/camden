@@ -1,4 +1,6 @@
 use crate::detector::{DuplicateDetector, ImageAnalysis, ImageFeatures, ImageMetadata};
+use crate::rename::ensure_guid_name;
+use crate::resolution::{resolution_tier, ResolutionTier};
 use crate::thumbnails::ThumbnailCache;
 use indicatif::ProgressBar;
 use rayon::prelude::*;
@@ -22,6 +24,10 @@ pub struct ScanConfig {
     pub extensions: Vec<String>,
     pub threading: ThreadingMode,
     pub thumbnail_cache_root: Option<PathBuf>,
+    /// When true, renames files to GUID format before processing.
+    pub rename_to_guid: bool,
+    /// When true, tags images below FHD resolution thresholds.
+    pub detect_low_resolution: bool,
 }
 
 impl ScanConfig {
@@ -31,11 +37,23 @@ impl ScanConfig {
             extensions,
             threading,
             thumbnail_cache_root: None,
+            rename_to_guid: false,
+            detect_low_resolution: false,
         }
     }
 
     pub fn with_thumbnail_root(mut self, root: PathBuf) -> Self {
         self.thumbnail_cache_root = Some(root);
+        self
+    }
+
+    pub fn with_guid_rename(mut self, enabled: bool) -> Self {
+        self.rename_to_guid = enabled;
+        self
+    }
+
+    pub fn with_low_resolution_detection(mut self, enabled: bool) -> Self {
+        self.detect_low_resolution = enabled;
         self
     }
 }
@@ -51,6 +69,8 @@ pub struct DuplicateEntry {
     pub dominant_color: [u8; 3],
     pub confidence: f32,
     pub thumbnail: Option<PathBuf>,
+    /// Resolution classification for the image.
+    pub resolution_tier: ResolutionTier,
 }
 
 /// A cluster of visually identical images identified during a scan.
@@ -70,6 +90,20 @@ impl ScanSummary {
     /// Returns an iterator over groups that contain potential duplicates.
     pub fn duplicate_groups(&self) -> impl Iterator<Item = &DuplicateGroup> {
         self.groups.iter().filter(|group| group.files.len() > 1)
+    }
+
+    /// Returns an iterator over groups that need user attention:
+    /// - Duplicate groups (2+ files with same fingerprint)
+    /// - Singleton groups where the file has actionable resolution (Mobile or Low)
+    pub fn actionable_groups(&self) -> impl Iterator<Item = &DuplicateGroup> {
+        self.groups.iter().filter(|group| {
+            group.files.len() > 1
+                || group
+                    .files
+                    .first()
+                    .map(|f| f.resolution_tier.is_actionable())
+                    .unwrap_or(false)
+        })
     }
 
     /// Indicates whether any groups were discovered.
@@ -146,9 +180,28 @@ fn handle_entry(
     progress_bar.inc(1);
     match entry {
         Ok(entry) => {
-            let path = entry.path().to_path_buf();
+            let mut path = entry.path().to_path_buf();
             progress_bar.set_message(format!("Scanning: {}", path.display()));
             if path.is_file() && has_image_extension(&path, &config.extensions) {
+                if config.rename_to_guid {
+                    match ensure_guid_name(&path) {
+                        Ok(new_path) => {
+                            if new_path != path {
+                                progress_bar.set_message(format!(
+                                    "Renamed: {} -> {}",
+                                    path.file_name().unwrap_or_default().to_string_lossy(),
+                                    new_path.file_name().unwrap_or_default().to_string_lossy()
+                                ));
+                            }
+                            path = new_path;
+                        }
+                        Err(error) => {
+                            progress_bar.set_message(format!("Rename error: {}", error));
+                            return None;
+                        }
+                    }
+                }
+
                 match detector.analyze(&path) {
                     Ok(mut analysis) => {
                         if let Some(cache) = cache {
@@ -161,6 +214,12 @@ fn handle_entry(
                                 }
                             }
                         }
+
+                        if config.detect_low_resolution {
+                            let (w, h) = analysis.metadata.dimensions;
+                            analysis.metadata.resolution_tier = resolution_tier(w, h);
+                        }
+
                         return Some(ImageRecord { path, analysis });
                     }
                     Err(error) => {
@@ -211,6 +270,7 @@ fn group_records(records: Vec<ImageRecord>, detector: &DuplicateDetector) -> Vec
                         dominant_color: metadata.dominant_color,
                         confidence: metadata.confidence,
                         thumbnail: metadata.thumbnail,
+                        resolution_tier: metadata.resolution_tier,
                     }
                 })
                 .collect(),

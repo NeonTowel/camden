@@ -1,10 +1,12 @@
-import { Button, LineEdit, ScrollView, ListView } from "std-widgets.slint";
+import { Button, LineEdit, ScrollView, ListView, CheckBox } from "std-widgets.slint";
 
 export struct FileData {
     display_name: string,
     info: string,
     selected: bool,
     thumbnail: image,
+    // Resolution tier: 0=High, 1=Mobile, 2=Low
+    resolution_tier: int,
 }
 
 export struct GroupData {
@@ -24,6 +26,8 @@ export component MainWindow inherits Window {
     in-out property <[GroupData]> groups: [];
     in-out property <bool> scanning: false;
     in-out property <float> progress_phase: 0.0;
+    in-out property <bool> rename_to_guid: false;
+    in-out property <bool> detect_low_resolution: false;
 
     callback browse_root();
     callback browse_target();
@@ -92,6 +96,22 @@ export component MainWindow inherits Window {
             }
         }
 
+        HorizontalLayout {
+            spacing: 16px;
+
+            CheckBox {
+                text: "Rename files to GUID";
+                checked <=> rename_to_guid;
+                enabled: !scanning;
+            }
+
+            CheckBox {
+                text: "Tag low resolution";
+                checked <=> detect_low_resolution;
+                enabled: !scanning;
+            }
+        }
+
         Rectangle {
             visible: scanning;
             width: 100%;
@@ -132,8 +152,9 @@ export component MainWindow inherits Window {
                             spacing: 6px;
 
                             Text {
-                                text: "Fingerprint: " + group.fingerprint + " (" + group.file_count + " files)";
+                                text: group.file_count == 1 ? "Low Resolution" : "Duplicates (" + group.file_count + " files)";
                                 font-weight: 600;
+                                color: group.file_count == 1 ? #e74c3c : #2c3e50;
                             }
 
                             HorizontalLayout {
@@ -166,6 +187,36 @@ export component MainWindow inherits Window {
                                             text: file.info;
                                             wrap: word-wrap;
                                             font-size: 9pt;
+                                        }
+
+                                        if file.resolution_tier == 1 : Rectangle {
+                                            height: 18px;
+                                            border-radius: 4px;
+                                            background: #e67e22;
+
+                                            Text {
+                                                text: "MOBILE";
+                                                font-size: 8pt;
+                                                font-weight: 700;
+                                                color: #ffffff;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        if file.resolution_tier == 2 : Rectangle {
+                                            height: 18px;
+                                            border-radius: 4px;
+                                            background: #e74c3c;
+
+                                            Text {
+                                                text: "LOW RES";
+                                                font-size: 8pt;
+                                                font-weight: 700;
+                                                color: #ffffff;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
 

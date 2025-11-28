@@ -1,4 +1,4 @@
-use camden_core::{ScanConfig, ScanSummary, ThreadingMode, move_paths, scan};
+use camden_core::{ResolutionTier, ScanConfig, ScanSummary, ThreadingMode, move_paths, scan};
 use indicatif::ProgressBar;
 use slint::{Image, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -23,6 +23,7 @@ struct InternalFile {
     sort_date: Option<String>,
     selected: bool,
     thumbnail: Option<PathBuf>,
+    resolution_tier: ResolutionTier,
 }
 
 #[derive(Clone)]
@@ -73,7 +74,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui.set_scanning(true);
                 ui.set_progress_phase(0.0);
                 ui.set_status_text("Scanning…".into());
-                let config = build_scan_config();
+
+                let rename_to_guid = ui.get_rename_to_guid();
+                let detect_low_resolution = ui.get_detect_low_resolution();
+                let config = build_scan_config(rename_to_guid, detect_low_resolution);
+
                 let ui_weak = ui_weak.clone();
                 let state = Arc::clone(&state);
 
@@ -196,14 +201,24 @@ fn perform_scan(
         state_mut.last_scan_duration = Some(duration);
     }
 
+    let duplicate_count = summary.duplicate_groups().count();
+    let mobile_count = summary
+        .groups
+        .iter()
+        .filter(|g| g.files.len() == 1 && g.files[0].resolution_tier == ResolutionTier::Mobile)
+        .count();
+    let low_res_count = summary
+        .groups
+        .iter()
+        .filter(|g| g.files.len() == 1 && g.files[0].resolution_tier == ResolutionTier::Low)
+        .count();
+
     let status = format!(
-        "Scan complete in {:.2}s: {} duplicate groups, {} files.",
+        "Scan complete in {:.2}s: {} duplicates, {} mobile-only, {} low-res.",
         duration.as_secs_f64(),
-        summary.duplicate_groups().count(),
-        summary
-            .duplicate_groups()
-            .map(|group| group.files.len())
-            .sum::<usize>()
+        duplicate_count,
+        mobile_count,
+        low_res_count
     );
 
     let state_clone = Arc::clone(&state);
@@ -292,6 +307,11 @@ fn build_group_model(groups: &[InternalGroup]) -> ModelRc<GroupData> {
                         .as_ref()
                         .and_then(|path| load_thumbnail(path))
                         .unwrap_or_default(),
+                    resolution_tier: match file.resolution_tier {
+                        ResolutionTier::High => 0,
+                        ResolutionTier::Mobile => 1,
+                        ResolutionTier::Low => 2,
+                    },
                 })
                 .collect();
             GroupData {
@@ -307,7 +327,7 @@ fn build_group_model(groups: &[InternalGroup]) -> ModelRc<GroupData> {
 
 fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {
     summary
-        .duplicate_groups()
+        .actionable_groups()
         .map(|group| {
             let fingerprint = format!("{:016x}", group.fingerprint);
             let mut files: Vec<InternalFile> = group
@@ -331,14 +351,20 @@ fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {
                         sort_date,
                         selected: false,
                         thumbnail: file.thumbnail.clone(),
+                        resolution_tier: file.resolution_tier,
                     }
                 })
                 .collect();
 
-            let keep_index = find_keep_index(&files);
-
-            for (index, file) in files.iter_mut().enumerate() {
-                file.selected = index != keep_index;
+            // For duplicate groups: select all except the best one to keep
+            // For resolution singletons: pre-select only if Low tier
+            if files.len() > 1 {
+                let keep_index = find_keep_index(&files);
+                for (index, file) in files.iter_mut().enumerate() {
+                    file.selected = index != keep_index;
+                }
+            } else if files.len() == 1 && files[0].resolution_tier.should_preselect() {
+                files[0].selected = true;
             }
 
             InternalGroup { fingerprint, files }
@@ -382,6 +408,7 @@ mod tests {
             sort_date: date.map(|s| s.to_string()),
             selected: false,
             thumbnail: None,
+            resolution_tier: ResolutionTier::High,
         }
     }
 
@@ -525,7 +552,7 @@ fn format_status(state: &AppState) -> String {
     )
 }
 
-fn build_scan_config() -> ScanConfig {
+fn build_scan_config(rename_to_guid: bool, detect_low_resolution: bool) -> ScanConfig {
     let mut config = ScanConfig::new(default_extensions(), ThreadingMode::Parallel);
     if let Some(mut dir) = dirs::data_local_dir() {
         dir.push("Camden");
@@ -533,6 +560,8 @@ fn build_scan_config() -> ScanConfig {
         config = config.with_thumbnail_root(dir);
     }
     config
+        .with_guid_rename(rename_to_guid)
+        .with_low_resolution_detection(detect_low_resolution)
 }
 
 fn default_extensions() -> Vec<String> {

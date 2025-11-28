@@ -106,6 +106,8 @@ pub struct ImageFeatures {
     pub texture: f64,
 }
 
+use crate::resolution::ResolutionTier;
+
 #[derive(Clone)]
 pub struct ImageMetadata {
     pub size_bytes: u64,
@@ -115,6 +117,7 @@ pub struct ImageMetadata {
     pub dominant_color: [u8; 3],
     pub confidence: f32,
     pub thumbnail: Option<PathBuf>,
+    pub resolution_tier: ResolutionTier,
 }
 
 #[derive(Clone)]
@@ -249,6 +252,7 @@ fn file_metadata(
         dominant_color,
         confidence: 1.0,
         thumbnail: None,
+        resolution_tier: ResolutionTier::High,
     })
 }
 

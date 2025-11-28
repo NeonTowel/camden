@@ -203,6 +203,7 @@ mod tests {
             dominant_color: [0, 0, 0],
             confidence: 1.0,
             thumbnail: None,
+            resolution_tier: crate::resolution::ResolutionTier::High,
         }
     }
 }

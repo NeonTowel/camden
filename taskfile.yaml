@@ -51,16 +51,36 @@ tasks:
         cd .vendor/vcpkg && ./vcpkg install opencv:x64-windows-static
 
   check:
+    silent: true
     cmds:
-      - cargo check --workspace --all-targets
+      - |
+        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
+        # Unset dynamic linking vars to avoid conflicts
+        unset OPENCV_LINK_PATHS
+        unset OPENCV_LINK_LIBS
+        unset OPENCV_INCLUDE_PATHS
+        
+        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
+        # We can pass rustflags via environment variable
+        export RUSTFLAGS="-C target-feature=+crt-static"
+
+        cargo check --workspace --all-targets
 
   fmt:
     cmds:
       - cargo fmt --all
 
   test:
+    silent: true
     cmds:
-      - cargo test --workspace --all-targets
+      - |
+        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
+        unset OPENCV_LINK_PATHS
+        unset OPENCV_LINK_LIBS
+        unset OPENCV_INCLUDE_PATHS
+        export RUSTFLAGS="-C target-feature=+crt-static"
+        
+        cargo test --workspace --all-targets
 
   frontend:
     desc: Run the Slint frontend application

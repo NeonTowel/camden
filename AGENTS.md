@@ -1,12 +1,15 @@
 # AGENTS.md - Camden Image Duplicate Finder
 
-## Commands
-- **Check**: `cargo check --workspace --all-targets`
-- **Build**: `cargo build --workspace` (or use `task build` for static OpenCV)
-- **Test all**: `cargo test --workspace --all-targets`
-- **Test single**: `cargo test -p camden-core test_name` (replace `test_name`)
-- **Format**: `cargo fmt --all`
-- **Lint**: `cargo clippy --workspace --all-targets`
+## Commands (prefer `task` over raw cargo)
+Taskfile sets environment variables for isolated dependencies (OpenCV, vcpkg in `.vendor/`).
+- **Check**: `task check`
+- **Build**: `task build` (static OpenCV via vcpkg)
+- **Release**: `task release`
+- **Test all**: `task test`
+- **Test single**: `cargo test -p camden-core test_name` (no task wrapper)
+- **Format**: `task fmt`
+- **Frontend**: `task frontend` (runs Slint GUI)
+- **Setup deps**: `task deps` then `task install-opencv-static`
 
 ## Architecture
 - **camden** (root): CLI entry point using `camden-core`, with `indicatif` progress bars
