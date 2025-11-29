@@ -100,13 +100,13 @@ export component MainWindow inherits Window {
             spacing: 16px;
 
             CheckBox {
-                text: "Rename files to GUID";
+                text: "Rename while scanning (using GUID for file names)?";
                 checked <=> rename_to_guid;
                 enabled: !scanning;
             }
 
             CheckBox {
-                text: "Tag low resolution";
+                text: "Tag low quality photos";
                 checked <=> detect_low_resolution;
                 enabled: !scanning;
             }
