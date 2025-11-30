@@ -74,7 +74,7 @@ enabled = true
 width = 224
 height = 224
 normalize = false
-layout = "NCHW"
+layout = "NHWC"
 
 [models.nsfwjs.output]
 num_classes = 5

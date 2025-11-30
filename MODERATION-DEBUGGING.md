@@ -22,14 +22,15 @@ Look for lines starting with "Moderation classification failed for" in the outpu
 - Run `task deps-models-hf` to download it
 
 #### Tensor shape mismatch
-- NSFWJS expects 224x224 input
+- NSFWJS expects 224x224 input in **NHWC format** (not NCHW)
 - Check that `[models.nsfwjs.input]` in camden-classifier.toml has:
   ```toml
   width = 224
   height = 224
   normalize = false
-  layout = "NCHW"
+  layout = "NHWC"
   ```
+- This is different from GantMan which uses NCHW layout
 
 #### ONNX Runtime error
 - Ensure ONNX Runtime library is available
