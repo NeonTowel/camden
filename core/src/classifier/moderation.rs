@@ -14,7 +14,8 @@ use std::path::Path;
 /// Model format enumeration for different NSFW classifiers.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ModerationModelFormat {
-    /// GantMan 5-class model (drawings, hentai, neutral, porn, sexy)
+    /// GantMan/NSFWJS 5-class model (drawings, hentai, neutral, porn, sexy)
+    /// Both models use the same class order
     GantMan5Class,
     /// 2-class model with normal/nsfw output order
     TwoClassNormalNsfw,
@@ -25,7 +26,26 @@ pub enum ModerationModelFormat {
 }
 
 impl ModerationModelFormat {
-    /// Detect format from label configuration.
+    /// Detect format from explicit hint or fall back to label-based detection.
+    /// 
+    /// # Arguments
+    /// * `format_hint` - Optional explicit format string (e.g., "gantman", "nsfwjs")
+    /// * `labels` - Class labels for automatic format detection
+    pub fn from_config(format_hint: Option<&str>, labels: &[String]) -> Self {
+        // Use explicit format hint if provided
+        if let Some(hint) = format_hint {
+            return match hint.to_lowercase().as_str() {
+                "gantman" | "gantman5" | "nsfwjs" | "nsfwjs5" => Self::GantMan5Class,
+                "falconsai" | "normal_nsfw" => Self::TwoClassNormalNsfw,
+                "adamcodd" | "nsfw_sfw" => Self::TwoClassNsfwSfw,
+                _ => Self::from_labels(labels),
+            };
+        }
+        
+        Self::from_labels(labels)
+    }
+    
+    /// Detect format from label configuration only.
     pub fn from_labels(labels: &[String]) -> Self {
         match labels.len() {
             5 if labels.iter().any(|l| l == "hentai") => Self::GantMan5Class,
@@ -65,12 +85,12 @@ impl Default for ModerationConfig {
 
 impl ModerationConfig {
     /// Create config from model input/output specs.
-    pub fn from_specs(input: &ModelInputSpec, labels: &[String]) -> Self {
+    pub fn from_specs(input: &ModelInputSpec, labels: &[String], format_hint: Option<&str>) -> Self {
         Self {
             input_width: input.width,
             input_height: input.height,
             normalize: input.normalize,
-            format: ModerationModelFormat::from_labels(labels),
+            format: ModerationModelFormat::from_config(format_hint, labels),
         }
     }
 }
@@ -486,5 +506,23 @@ mod tests {
 
         let adamcodd = ModerationModelFormat::from_labels(&["nsfw".into(), "sfw".into()]);
         assert_eq!(adamcodd, ModerationModelFormat::TwoClassNsfwSfw);
+    }
+    
+    #[test]
+    fn test_format_explicit_hint() {
+        let labels = vec![
+            "drawings".into(), "hentai".into(), "neutral".into(), "porn".into(), "sexy".into()
+        ];
+        
+        // Both GantMan and NSFWJS hints should resolve to the same 5-class format
+        let gantman = ModerationModelFormat::from_config(Some("gantman"), &labels);
+        assert_eq!(gantman, ModerationModelFormat::GantMan5Class);
+        
+        let nsfwjs = ModerationModelFormat::from_config(Some("nsfwjs"), &labels);
+        assert_eq!(nsfwjs, ModerationModelFormat::GantMan5Class);
+        
+        // Without hint, should detect GantMan5Class from labels
+        let auto = ModerationModelFormat::from_config(None, &labels);
+        assert_eq!(auto, ModerationModelFormat::GantMan5Class);
     }
 }

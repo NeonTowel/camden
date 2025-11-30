@@ -149,6 +149,7 @@ impl ImageClassifier {
             let mod_config = ModerationConfig::from_specs(
                 &model_config.input,
                 &model_config.output.labels,
+                model_config.output.format.as_deref(),
             );
             NsfwClassifier::with_config(&moderation_path, mod_config)?
         } else {

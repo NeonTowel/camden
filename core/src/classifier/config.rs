@@ -63,6 +63,9 @@ pub struct ModelOutputSpec {
     /// Path to labels file (optional, one label per line)
     #[serde(default)]
     pub labels_file: Option<PathBuf>,
+    /// Optional format hint for moderation models (e.g., "gantman", "nsfwjs")
+    #[serde(default)]
+    pub format: Option<String>,
 }
 
 impl Default for ModelOutputSpec {
@@ -71,6 +74,7 @@ impl Default for ModelOutputSpec {
             num_classes: 1000,
             labels: Vec::new(),
             labels_file: None,
+            format: None,
         }
     }
 }
@@ -191,6 +195,7 @@ impl Default for ClassifierConfig {
                         "sexy".to_string(),
                     ],
                     labels_file: None,
+                    format: Some("gantman".to_string()),
                 },
                 description: "5-class NSFW detection (drawings, hentai, neutral, porn, sexy)".to_string(),
                 enabled: true,
@@ -214,6 +219,7 @@ impl Default for ClassifierConfig {
                     num_classes: 1000,
                     labels: Vec::new(), // Use built-in ImageNet labels
                     labels_file: None,
+                    format: None,
                 },
                 description: "ImageNet 1000-class classification, optimized for mobile".to_string(),
                 enabled: true,
@@ -372,6 +378,7 @@ impl ClassifierConfig {
                             "sexy".to_string(),
                         ],
                         labels_file: None,
+                        format: Some("gantman".to_string()),
                     },
                     description: "5-class NSFW detection".to_string(),
                     enabled: true,
@@ -398,6 +405,7 @@ impl ClassifierConfig {
                         num_classes: 1000,
                         labels: Vec::new(),
                         labels_file: None,
+                        format: None,
                     },
                     description: "ImageNet 1000-class, fast inference".to_string(),
                     enabled: true,
@@ -423,6 +431,7 @@ impl ClassifierConfig {
                         num_classes: 1000,
                         labels: Vec::new(),
                         labels_file: None,
+                        format: None,
                     },
                     description: "Higher accuracy ImageNet classification".to_string(),
                     enabled: true,
@@ -448,6 +457,7 @@ impl ClassifierConfig {
                         num_classes: 1000,
                         labels: Vec::new(),
                         labels_file: None,
+                        format: None,
                     },
                     description: "Classic ResNet, good accuracy/speed balance".to_string(),
                     enabled: true,

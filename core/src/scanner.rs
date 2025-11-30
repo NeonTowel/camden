@@ -282,6 +282,9 @@ fn handle_entry(
                                             Some(flags.tier.to_string());
                                     }
                                     Err(e) => {
+                                        // Log error details but continue scanning
+                                        eprintln!("Moderation classification failed for {}: {}", 
+                                                 path.display(), e);
                                         progress_bar.set_message(format!(
                                             "Moderation error: {}",
                                             e
