@@ -6,7 +6,7 @@
 //! - AdamCodd 2-class: nsfw, sfw (384x384)
 
 use super::config::ModelInputSpec;
-use super::runtime::{load_session, preprocess_image, softmax, ClassifierError};
+use super::runtime::{load_session, preprocess_image_with_layout, softmax, ClassifierError};
 use ort::session::Session;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -68,6 +68,8 @@ pub struct ModerationConfig {
     pub input_height: u32,
     /// Whether to apply ImageNet normalization
     pub normalize: bool,
+    /// Input tensor layout (NCHW or NHWC)
+    pub layout: String,
     /// Model format for output interpretation
     pub format: ModerationModelFormat,
 }
@@ -78,6 +80,7 @@ impl Default for ModerationConfig {
             input_width: 299,
             input_height: 299,
             normalize: false,
+            layout: "NCHW".to_string(),
             format: ModerationModelFormat::GantMan5Class,
         }
     }
@@ -90,6 +93,7 @@ impl ModerationConfig {
             input_width: input.width,
             input_height: input.height,
             normalize: input.normalize,
+            layout: input.layout.clone(),
             format: ModerationModelFormat::from_config(format_hint, labels),
         }
     }
@@ -117,8 +121,13 @@ impl NsfwClassifier {
     pub fn classify(&mut self, image_path: &Path) -> Result<ModerationFlags, ClassifierError> {
         let input_size = (self.config.input_width as i32, self.config.input_height as i32);
         
-        // Preprocess with model-specific settings
-        let input = preprocess_image(image_path, input_size, self.config.normalize)?;
+        // Preprocess with model-specific settings (layout, normalization)
+        let input = preprocess_image_with_layout(
+            image_path,
+            input_size,
+            self.config.normalize,
+            &self.config.layout,
+        )?;
 
         // Get input name from model
         let input_name = self
