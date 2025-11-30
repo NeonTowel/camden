@@ -80,7 +80,7 @@ impl Default for ModerationConfig {
             input_width: 299,
             input_height: 299,
             normalize: false,
-            layout: "NCHW".to_string(),
+            layout: "NHWC".to_string(),
             format: ModerationModelFormat::GantMan5Class,
         }
     }

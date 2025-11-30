@@ -31,7 +31,7 @@ enabled = true
 width = 299
 height = 299
 normalize = false  # Model expects 0-1 range, not ImageNet normalization
-layout = "NCHW"
+layout = "NHWC"
 
 [models.gantman-nsfw.output]
 num_classes = 5

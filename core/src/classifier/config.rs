@@ -183,7 +183,7 @@ impl Default for ClassifierConfig {
                     width: 299,
                     height: 299,
                     normalize: false, // 0-1 range, no ImageNet normalization
-                    layout: "NCHW".to_string(),
+                    layout: "NHWC".to_string(),
                 },
                 output: ModelOutputSpec {
                     num_classes: 5,
@@ -366,7 +366,7 @@ impl ClassifierConfig {
                         width: 299,
                         height: 299,
                         normalize: false,
-                        layout: "NCHW".to_string(),
+                        layout: "NHWC".to_string(),
                     },
                     output: ModelOutputSpec {
                         num_classes: 5,
