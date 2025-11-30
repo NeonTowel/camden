@@ -204,6 +204,8 @@ mod tests {
             confidence: 1.0,
             thumbnail: None,
             resolution_tier: crate::resolution::ResolutionTier::High,
+            moderation_tier: None,
+            tags: Vec::new(),
         }
     }
 }

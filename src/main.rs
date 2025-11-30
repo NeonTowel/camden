@@ -2,7 +2,7 @@ mod cli;
 
 use camden_core::{
     count_entries, create_snapshot, move_duplicates, print_duplicates, progress, scan, write_json,
-    write_snapshot, ScanConfig,
+    write_snapshot, write_classification_report, ScanConfig,
 };
 use cli::{CliConfig, Command, PreviewConfig};
 use indicatif::ProgressBar;
@@ -12,8 +12,16 @@ use std::sync::Arc;
 
 fn main() {
     let command = Command::from_env().unwrap_or_else(|err| {
-        eprintln!("{}", err);
-        std::process::exit(1);
+        match err {
+            cli::CliError::Help => {
+                println!("{}", err);
+                std::process::exit(0);
+            }
+            _ => {
+                eprintln!("{}", err);
+                std::process::exit(1);
+            }
+        }
     });
 
     match command {
@@ -29,7 +37,11 @@ fn run_scan(config: CliConfig) {
 
     progress_bar.set_style(progress::default_style());
 
-    let scan_config = ScanConfig::new(config.extensions.clone(), config.threading);
+    let scan_config = ScanConfig::new(config.extensions.clone(), config.threading)
+        .with_guid_rename(config.rename_to_guid)
+        .with_low_resolution_detection(config.detect_low_resolution)
+        .with_classification(config.enable_classification);
+    
     let summary = scan(&config.root, &scan_config, &progress_bar);
     progress_bar.finish_with_message("Scan complete");
 
@@ -37,6 +49,14 @@ fn run_scan(config: CliConfig) {
     match write_json(&summary, Path::new("identical_files.json")) {
         Ok(_) => println!("JSON output written to identical_files.json"),
         Err(error) => eprintln!("Error writing JSON output: {}", error),
+    }
+
+    if config.enable_classification {
+        if let Err(e) = write_classification_report(&summary, &config.root) {
+            eprintln!("Error writing classification report: {}", e);
+        } else {
+            println!("Classification report written.");
+        }
     }
 
     if let Some(target_dir) = config.target.as_ref() {
@@ -60,13 +80,25 @@ fn run_preview(config: PreviewConfig) {
     let progress_bar = Arc::new(progress_bar);
     progress_bar.set_style(progress::default_style());
 
-    let mut scan_config = ScanConfig::new(config.extensions.clone(), config.threading);
+    let mut scan_config = ScanConfig::new(config.extensions.clone(), config.threading)
+        .with_guid_rename(config.rename_to_guid)
+        .with_low_resolution_detection(config.detect_low_resolution)
+        .with_classification(config.enable_classification);
+    
     if let Some(root) = config.thumbnail_root() {
         scan_config = scan_config.with_thumbnail_root(root.to_path_buf());
     }
 
     let summary = scan(&config.root, &scan_config, &progress_bar);
     progress_bar.finish_with_message("Preview scan complete");
+
+    if config.enable_classification {
+        if let Err(e) = write_classification_report(&summary, &config.root) {
+            eprintln!("Error writing classification report: {}", e);
+        } else {
+            println!("Classification report written.");
+        }
+    }
 
     let snapshot = create_snapshot(&config.root, summary.clone());
     match write_snapshot(&snapshot, &config.output) {

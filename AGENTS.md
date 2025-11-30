@@ -17,6 +17,14 @@ Taskfile sets environment variables for isolated dependencies (OpenCV, vcpkg in 
 - **camden-frontend**: Slint-based GUI (requires vcpkg/OpenCV static build)
 - Uses OpenCV for image processing, xxHash checksums, rayon for parallelism
 
+## CLI / Frontend Feature Parity
+**IMPORTANT**: When implementing new features, ensure both CLI and frontend remain in sync:
+- CLI flags should mirror frontend UI options (e.g., `--enable-classification` ↔ checkbox)
+- Use shared `ScanConfig` builder methods from `camden-core` for both
+- CLI flags: `--rename-to-guid`, `--detect-low-resolution`, `--enable-classification` (or `--classify`)
+- Test features in both interfaces before considering implementation complete
+- UX should feel consistent: same defaults, same behavior, same output formats
+
 ## Code Style (Rust)
 - Edition 2021, format with `rustfmt`, lint with `clippy`
 - Use `Result<T, E>` for errors, `?` operator for propagation; avoid `panic!` for recoverable errors

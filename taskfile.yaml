@@ -7,8 +7,188 @@ tasks:
     - task --list-all
 
   deps:
-    - scoop install llvm #cmake vcpkg
-    - task: install-opencv
+    desc: Install all development dependencies
+    cmds:
+      - scoop install llvm
+      - task: install-opencv-static
+
+  deps-onnxruntime:
+    silent: true
+    desc: Download ONNX Runtime from GitHub releases to .vendor/onnxruntime
+    vars:
+      ORT_VERSION: "1.23.2"
+    cmds:
+      - |
+        if [ -d ".vendor/onnxruntime" ]; then
+          echo "ONNX Runtime is already installed."
+        else
+          echo "Downloading ONNX Runtime {{.ORT_VERSION}}..."
+          mkdir -p .vendor
+          curl --ssl-no-revoke -L -o onnxruntime.zip \
+            "https://github.com/microsoft/onnxruntime/releases/download/v{{.ORT_VERSION}}/onnxruntime-win-x64-{{.ORT_VERSION}}.zip"
+          
+          echo "Extracting ONNX Runtime..."
+          7z x onnxruntime.zip -o.vendor
+          mv ".vendor/onnxruntime-win-x64-{{.ORT_VERSION}}" .vendor/onnxruntime
+          rm onnxruntime.zip
+          
+          echo "ONNX Runtime {{.ORT_VERSION}} installed to .vendor/onnxruntime"
+          echo "Contents:"
+          ls -la .vendor/onnxruntime/lib/
+        fi
+
+  deps-models:
+    silent: true
+    desc: Download default AI classification models to .vendor/models
+    cmds:
+      - |
+        if [ -d ".vendor/models" ]; then
+          echo "Models directory exists."
+        else
+          mkdir -p .vendor/models
+        fi
+        
+        # MobileNetV2 - Image tagging (ImageNet 1000 classes)
+        if [ -f ".vendor/models/mobilenetv2-12.onnx" ]; then
+          echo "[1/2] MobileNetV2 tagging model: already downloaded."
+        else
+          echo "[1/2] Downloading MobileNetV2 tagging model (~14MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/mobilenetv2-12.onnx" \
+            "https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx"
+        fi
+        
+        # GantMan NSFW Model (ONNX) - 5-class moderation
+        # Classes: drawings, hentai, neutral, porn, sexy
+        # Converted from https://github.com/GantMan/nsfw_model
+        if [ -f ".vendor/models/nsfw-inception-v3.onnx" ]; then
+          echo "[2/2] NSFW moderation model: already downloaded."
+        else
+          echo "[2/2] Downloading NSFW moderation model (~85MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/nsfw-inception-v3.onnx" \
+            "https://github.com/iola1999/nsfw-detect-onnx/releases/download/v1.0.0/model.onnx"
+        fi
+        
+        echo ""
+        echo "Models ready in: .vendor/models/"
+        echo "  - mobilenetv2-12.onnx      (tagging)"
+        echo "  - nsfw-inception-v3.onnx   (moderation)"
+        echo ""
+        echo "For additional models, run: task deps-models-extra"
+
+  deps-models-extra:
+    silent: true
+    desc: Download additional AI models (EfficientNet, ResNet)
+    cmds:
+      - |
+        mkdir -p .vendor/models
+        
+        # EfficientNet-Lite4 - Higher accuracy tagging (~50MB)
+        if [ -f ".vendor/models/efficientnet-lite4-11.onnx" ]; then
+          echo "[1/2] EfficientNet-Lite4: already downloaded."
+        else
+          echo "[1/2] Downloading EfficientNet-Lite4 (~50MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/efficientnet-lite4-11.onnx" \
+            "https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx"
+        fi
+        
+        # ResNet-50 - Classic architecture (~100MB)
+        if [ -f ".vendor/models/resnet50-v2-7.onnx" ]; then
+          echo "[2/2] ResNet-50: already downloaded."
+        else
+          echo "[2/2] Downloading ResNet-50 (~100MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/resnet50-v2-7.onnx" \
+            "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-v2-7.onnx"
+        fi
+        
+        echo ""
+        echo "Extra models downloaded to .vendor/models/"
+        echo "  - efficientnet-lite4-11.onnx  (higher accuracy tagging)"
+        echo "  - resnet50-v2-7.onnx          (classic ResNet)"
+        echo ""
+        echo "To use these models, update camden-classifier.toml:"
+        echo "  active_tagging = \"efficientnet-lite4\"  # or \"resnet50\""
+
+  deps-models-hf:
+    silent: true
+    desc: Download pre-converted ONNX models from Hugging Face
+    cmds:
+      - |
+        mkdir -p .vendor/models
+        
+        echo "Downloading pre-converted ONNX models from Hugging Face..."
+        echo ""
+        
+        # ============ TAGGING MODELS ============
+        
+        # ViT-base-224 ImageNet from Xenova (pre-converted)
+        if [ -f ".vendor/models/vit-base-224.onnx" ]; then
+          echo "[1/4] ViT-base-224 (tagging): already downloaded."
+        else
+          echo "[1/4] Downloading ViT-base-224 from HuggingFace (~347MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/vit-base-224.onnx" \
+            "https://huggingface.co/Xenova/vit-base-patch16-224/resolve/main/onnx/model.onnx"
+        fi
+        
+        # ViT-base-224 quantized (smaller, faster)
+        if [ -f ".vendor/models/vit-base-224-q8.onnx" ]; then
+          echo "[2/4] ViT-base-224 quantized (tagging): already downloaded."
+        else
+          echo "[2/4] Downloading ViT-base-224 quantized (~88MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/vit-base-224-q8.onnx" \
+            "https://huggingface.co/Xenova/vit-base-patch16-224/resolve/main/onnx/model_quantized.onnx"
+        fi
+        
+        # ============ MODERATION MODELS ============
+        
+        # ONNX Community NSFW detector (5-class ViT, same classes as GantMan)
+        # Source: https://huggingface.co/onnx-community/nsfw-image-detector-ONNX
+        if [ -f ".vendor/models/onnx-community-nsfw.onnx" ]; then
+          echo "[3/4] ONNX Community NSFW (moderation): already downloaded."
+        else
+          echo "[3/4] Downloading ONNX Community NSFW ViT (~343MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/onnx-community-nsfw.onnx" \
+            "https://huggingface.co/onnx-community/nsfw-image-detector-ONNX/resolve/main/onnx/model.onnx"
+        fi
+        
+        # DeepGHS NSFWJS model (5-class, smaller/faster)
+        # Source: https://huggingface.co/deepghs/imgutils-models
+        if [ -f ".vendor/models/nsfwjs.onnx" ]; then
+          echo "[4/4] NSFWJS (moderation): already downloaded."
+        else
+          echo "[4/4] Downloading NSFWJS model (~10MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/nsfwjs.onnx" \
+            "https://huggingface.co/deepghs/imgutils-models/resolve/main/nsfw/nsfwjs.onnx"
+        fi
+        
+        echo ""
+        echo "HuggingFace models downloaded to .vendor/models/"
+        echo ""
+        echo "Tagging models:"
+        echo "  - vit-base-224.onnx         (Vision Transformer, 347MB)"
+        echo "  - vit-base-224-q8.onnx      (Vision Transformer quantized, 88MB)"
+        echo ""
+        echo "Moderation models:"
+        echo "  - onnx-community-nsfw.onnx  (ViT 5-class, 343MB, high accuracy)"
+        echo "  - nsfwjs.onnx               (MobileNet 5-class, 10MB, fast)"
+        echo ""
+        echo "To use, update camden-classifier.toml:"
+        echo "  active_moderation = \"onnx-community-nsfw\"  # or \"nsfwjs\""
+        echo "  active_tagging = \"vit-base-224\""
+
+  convert-hf-model:
+    desc: Convert a HuggingFace model to ONNX (requires Python + torch)
+    cmds:
+      - |
+        if [ -z "{{.MODEL}}" ]; then
+          echo "Usage: task convert-hf-model MODEL=Falconsai/nsfw_image_detection OUTPUT=.vendor/models/model.onnx"
+          echo ""
+          echo "Known presets:"
+          python scripts/convert_hf_to_onnx.py --list-presets
+          exit 1
+        fi
+        
+        OUTPUT="${OUTPUT:-.vendor/models/converted.onnx}"
+        python scripts/convert_hf_to_onnx.py --model "{{.MODEL}}" --output "$OUTPUT"
 
   install-opencv:
     vars:
@@ -131,3 +311,23 @@ tasks:
         export RUSTFLAGS="-C target-feature=+crt-static"
         
         cargo build --workspace --release
+
+  run:
+    desc: Run the camden cli application with the given arguments
+    silent: true
+    vars:
+      ARGS: "{{ .CLI_ARGS | default \"--help\" }}"
+    cmds:
+      - |
+
+        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
+        # Unset dynamic linking vars to avoid conflicts
+        unset OPENCV_LINK_PATHS
+        unset OPENCV_LINK_LIBS
+        unset OPENCV_INCLUDE_PATHS
+        
+        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
+        # We can pass rustflags via environment variable
+        export RUSTFLAGS="-C target-feature=+crt-static"
+
+        cargo run -p camden -- {{ .ARGS }}

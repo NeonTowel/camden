@@ -1,3 +1,4 @@
+use crate::classifier::{self, ClassifierConfig, ImageClassifier};
 use crate::detector::{DuplicateDetector, ImageAnalysis, ImageFeatures, ImageMetadata};
 use crate::rename::ensure_guid_name;
 use crate::resolution::{resolution_tier, ResolutionTier};
@@ -7,7 +8,7 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
 
 const BUCKET_PREFIX_BITS: u32 = 48;
@@ -28,6 +29,8 @@ pub struct ScanConfig {
     pub rename_to_guid: bool,
     /// When true, tags images below FHD resolution thresholds.
     pub detect_low_resolution: bool,
+    /// When true, runs AI classification (moderation + tagging) on each image.
+    pub enable_classification: bool,
 }
 
 impl ScanConfig {
@@ -39,6 +42,7 @@ impl ScanConfig {
             thumbnail_cache_root: None,
             rename_to_guid: false,
             detect_low_resolution: false,
+            enable_classification: false,
         }
     }
 
@@ -56,7 +60,15 @@ impl ScanConfig {
         self.detect_low_resolution = enabled;
         self
     }
+
+    pub fn with_classification(mut self, enabled: bool) -> Self {
+        self.enable_classification = enabled;
+        self
+    }
 }
+
+/// Maximum number of tags to keep per image.
+pub const MAX_TAGS_PER_IMAGE: usize = 5;
 
 /// A file entry that belongs to a duplicate group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +83,12 @@ pub struct DuplicateEntry {
     pub thumbnail: Option<PathBuf>,
     /// Resolution classification for the image.
     pub resolution_tier: ResolutionTier,
+    /// AI moderation tier (if classification was enabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moderation_tier: Option<String>,
+    /// AI-generated tags (if classification was enabled, max 5).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
 }
 
 /// A cluster of visually identical images identified during a scan.
@@ -122,9 +140,37 @@ pub fn scan(root: &Path, config: &ScanConfig, progress_bar: &Arc<ProgressBar>) -
         .ok()
         .map(Arc::new);
 
+    // Initialize classifier if enabled
+    let classifier: Option<Arc<Mutex<ImageClassifier>>> = if config.enable_classification {
+        // Load classifier configuration
+        let classifier_config = ClassifierConfig::load_or_default();
+        
+        // Initialize ONNX Runtime
+        let ort_path = &classifier_config.ort_library;
+        if let Err(e) = classifier::init_ort_runtime(ort_path) {
+            progress_bar.set_message(format!("Classification disabled: {}", e));
+            None
+        } else {
+            // Load classifier models from config
+            match ImageClassifier::from_config(classifier_config) {
+                Ok(c) => Some(Arc::new(Mutex::new(c))),
+                Err(e) => {
+                    progress_bar.set_message(format!("Classification disabled: {}", e));
+                    None
+                }
+            }
+        }
+    } else {
+        None
+    };
+
     let groups = match config.threading {
-        ThreadingMode::Parallel => scan_parallel(root, config, progress_bar, &detector, &cache),
-        ThreadingMode::Sequential => scan_sequential(root, config, progress_bar, &detector, &cache),
+        ThreadingMode::Parallel => {
+            scan_parallel(root, config, progress_bar, &detector, &cache, &classifier)
+        }
+        ThreadingMode::Sequential => {
+            scan_sequential(root, config, progress_bar, &detector, &cache, &classifier)
+        }
     };
 
     ScanSummary { groups }
@@ -136,11 +182,14 @@ fn scan_parallel(
     progress_bar: &Arc<ProgressBar>,
     detector: &DuplicateDetector,
     cache: &Option<Arc<ThumbnailCache>>,
+    classifier: &Option<Arc<Mutex<ImageClassifier>>>,
 ) -> Vec<DuplicateGroup> {
     let records = WalkDir::new(root)
         .into_iter()
         .par_bridge()
-        .filter_map(|entry| handle_entry(entry, config, progress_bar, detector, cache.as_deref()))
+        .filter_map(|entry| {
+            handle_entry(entry, config, progress_bar, detector, cache.as_deref(), classifier)
+        })
         .fold(Vec::new, |mut collection, record| {
             collection.push(record);
             collection
@@ -159,10 +208,12 @@ fn scan_sequential(
     progress_bar: &Arc<ProgressBar>,
     detector: &DuplicateDetector,
     cache: &Option<Arc<ThumbnailCache>>,
+    classifier: &Option<Arc<Mutex<ImageClassifier>>>,
 ) -> Vec<DuplicateGroup> {
     let mut records = Vec::new();
     for entry in WalkDir::new(root) {
-        if let Some(record) = handle_entry(entry, config, progress_bar, detector, cache.as_deref())
+        if let Some(record) =
+            handle_entry(entry, config, progress_bar, detector, cache.as_deref(), classifier)
         {
             records.push(record);
         }
@@ -176,6 +227,7 @@ fn handle_entry(
     progress_bar: &Arc<ProgressBar>,
     detector: &DuplicateDetector,
     cache: Option<&ThumbnailCache>,
+    classifier: &Option<Arc<Mutex<ImageClassifier>>>,
 ) -> Option<ImageRecord> {
     progress_bar.inc(1);
     match entry {
@@ -218,6 +270,37 @@ fn handle_entry(
                         if config.detect_low_resolution {
                             let (w, h) = analysis.metadata.dimensions;
                             analysis.metadata.resolution_tier = resolution_tier(w, h);
+                        }
+
+                        // Run AI classification if enabled
+                        if let Some(classifier) = classifier {
+                            if let Ok(mut clf) = classifier.lock() {
+                                // Run moderation
+                                match clf.moderate(&path) {
+                                    Ok(flags) => {
+                                        analysis.metadata.moderation_tier =
+                                            Some(flags.tier.to_string());
+                                    }
+                                    Err(e) => {
+                                        progress_bar.set_message(format!(
+                                            "Moderation error: {}",
+                                            e
+                                        ));
+                                    }
+                                }
+
+                                // Run tagging (max 5 tags)
+                                match clf.tag(&path, MAX_TAGS_PER_IMAGE) {
+                                    Ok(tags) => {
+                                        analysis.metadata.tags =
+                                            tags.into_iter().map(|t| t.label).collect();
+                                    }
+                                    Err(e) => {
+                                        progress_bar
+                                            .set_message(format!("Tagging error: {}", e));
+                                    }
+                                }
+                            }
                         }
 
                         return Some(ImageRecord { path, analysis });
@@ -271,6 +354,8 @@ fn group_records(records: Vec<ImageRecord>, detector: &DuplicateDetector) -> Vec
                         confidence: metadata.confidence,
                         thumbnail: metadata.thumbnail,
                         resolution_tier: metadata.resolution_tier,
+                        moderation_tier: metadata.moderation_tier,
+                        tags: metadata.tags,
                     }
                 })
                 .collect(),

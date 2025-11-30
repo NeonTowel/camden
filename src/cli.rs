@@ -16,6 +16,9 @@ pub struct CliConfig {
     pub target: Option<PathBuf>,
     pub threading: ThreadingMode,
     pub extensions: Vec<String>,
+    pub rename_to_guid: bool,
+    pub detect_low_resolution: bool,
+    pub enable_classification: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -25,6 +28,9 @@ pub struct PreviewConfig {
     pub threading: ThreadingMode,
     pub extensions: Vec<String>,
     pub thumbnail_root: Option<PathBuf>,
+    pub rename_to_guid: bool,
+    pub detect_low_resolution: bool,
+    pub enable_classification: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -32,6 +38,7 @@ pub enum CliError {
     MissingRoot,
     MissingOutput,
     InvalidFlag(String),
+    Help,
 }
 
 impl Command {
@@ -45,6 +52,7 @@ impl Command {
     {
         let mut args = args.into_iter();
         match args.next() {
+            Some(first) if first == "--help" || first == "-h" => Err(CliError::Help),
             Some(first) if first == "preview-scan" => {
                 PreviewConfig::parse(args).map(Command::Preview)
             }
@@ -53,7 +61,7 @@ impl Command {
                 rest.extend(args);
                 CliConfig::from_iter(rest.into_iter()).map(Command::Scan)
             }
-            None => Err(CliError::MissingRoot),
+            None => Err(CliError::Help),
         }
     }
 }
@@ -73,11 +81,26 @@ impl CliConfig {
         let mut root: Option<PathBuf> = None;
         let mut target: Option<PathBuf> = None;
         let mut threading = ThreadingMode::Parallel;
+        let mut rename_to_guid = false;
+        let mut detect_low_resolution = false;
+        let mut enable_classification = false;
 
         for arg in args.by_ref() {
             if arg.starts_with("--") {
                 if arg == "--no-thread" {
                     threading = ThreadingMode::Sequential;
+                    continue;
+                }
+                if arg == "--rename-to-guid" {
+                    rename_to_guid = true;
+                    continue;
+                }
+                if arg == "--detect-low-resolution" {
+                    detect_low_resolution = true;
+                    continue;
+                }
+                if arg == "--enable-classification" || arg == "--classify" {
+                    enable_classification = true;
                     continue;
                 }
                 if let Some(value) = arg.strip_prefix("--target=") {
@@ -111,6 +134,9 @@ impl CliConfig {
             target,
             threading,
             extensions: default_extensions(),
+            rename_to_guid,
+            detect_low_resolution,
+            enable_classification,
         })
     }
 }
@@ -124,11 +150,26 @@ impl PreviewConfig {
         let mut output: Option<PathBuf> = None;
         let mut thumbnail_root: Option<PathBuf> = None;
         let mut threading = ThreadingMode::Parallel;
+        let mut rename_to_guid = false;
+        let mut detect_low_resolution = false;
+        let mut enable_classification = false;
 
         for arg in args.by_ref() {
             if arg.starts_with("--") {
                 if arg == "--no-thread" {
                     threading = ThreadingMode::Sequential;
+                    continue;
+                }
+                if arg == "--rename-to-guid" {
+                    rename_to_guid = true;
+                    continue;
+                }
+                if arg == "--detect-low-resolution" {
+                    detect_low_resolution = true;
+                    continue;
+                }
+                if arg == "--enable-classification" || arg == "--classify" {
+                    enable_classification = true;
                     continue;
                 }
                 if let Some(value) = arg.strip_prefix("--root=") {
@@ -170,6 +211,9 @@ impl PreviewConfig {
             threading,
             extensions: default_extensions(),
             thumbnail_root,
+            rename_to_guid,
+            detect_low_resolution,
+            enable_classification,
         })
     }
 
@@ -184,8 +228,48 @@ impl Display for CliError {
             Self::MissingRoot => write!(f, "root directory argument is required"),
             Self::MissingOutput => write!(f, "snapshot output path is required"),
             Self::InvalidFlag(flag) => write!(f, "unrecognized argument: {}", flag),
+            Self::Help => write!(f, "{}", help_text()),
         }
     }
+}
+
+fn help_text() -> &'static str {
+    r#"Camden - Image Duplicate Finder
+
+USAGE:
+    camden <ROOT> [TARGET] [OPTIONS]
+    camden preview-scan <ROOT> [OPTIONS]
+
+COMMANDS:
+    (default)       Scan for duplicates and optionally move them
+    preview-scan    Scan and generate a preview snapshot for the GUI
+
+SCAN OPTIONS:
+    <ROOT>                      Root directory to scan
+    [TARGET]                    Target directory for moving duplicates
+    --root=<PATH>               Root directory (alternative syntax)
+    --target=<PATH>             Target directory (alternative syntax)
+
+PREVIEW-SCAN OPTIONS:
+    <ROOT>                      Root directory to scan
+    --root=<PATH>               Root directory (alternative syntax)
+    --output=<PATH>             Output snapshot path
+    --thumbnail-root=<PATH>     Directory for thumbnail cache
+
+COMMON OPTIONS:
+    --no-thread                 Disable parallel processing
+    --rename-to-guid            Rename files to GUID format
+    --detect-low-resolution     Flag low-resolution images
+    --enable-classification     Enable AI image classification
+    --classify                  Alias for --enable-classification
+    -h, --help                  Show this help message
+
+EXAMPLES:
+    camden ./photos
+    camden ./photos ./duplicates --enable-classification
+    camden --root=./images --target=./dupes --detect-low-resolution
+    camden preview-scan ./photos --classify --thumbnail-root=./thumbs
+"#
 }
 
 impl Error for CliError {}
@@ -213,6 +297,9 @@ mod tests {
                 assert!(config.target.is_none());
                 assert_eq!(config.threading, ThreadingMode::Parallel);
                 assert_eq!(config.extensions, default_extensions());
+                assert!(!config.rename_to_guid);
+                assert!(!config.detect_low_resolution);
+                assert!(!config.enable_classification);
             }
             _ => panic!("expected scan command"),
         }
@@ -224,6 +311,9 @@ mod tests {
             String::from("--root=./images"),
             String::from("--target=./duplicates"),
             String::from("--no-thread"),
+            String::from("--rename-to-guid"),
+            String::from("--detect-low-resolution"),
+            String::from("--enable-classification"),
         ])
         .unwrap();
         match command {
@@ -231,6 +321,9 @@ mod tests {
                 assert_eq!(config.root, PathBuf::from("./images"));
                 assert_eq!(config.target, Some(PathBuf::from("./duplicates")));
                 assert_eq!(config.threading, ThreadingMode::Sequential);
+                assert!(config.rename_to_guid);
+                assert!(config.detect_low_resolution);
+                assert!(config.enable_classification);
             }
             _ => panic!("expected scan command"),
         }
@@ -244,6 +337,7 @@ mod tests {
             String::from("--output=./cache/groups.json"),
             String::from("--thumbnail-root=./thumbs"),
             String::from("--no-thread"),
+            String::from("--classify"),
         ])
         .unwrap();
         match command {
@@ -252,6 +346,7 @@ mod tests {
                 assert_eq!(config.output, PathBuf::from("./cache/groups.json"));
                 assert_eq!(config.thumbnail_root, Some(PathBuf::from("./thumbs")));
                 assert_eq!(config.threading, ThreadingMode::Sequential);
+                assert!(config.enable_classification);
             }
             _ => panic!("expected preview command"),
         }

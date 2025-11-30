@@ -122,6 +122,8 @@ mod tests {
                     confidence: 0.9,
                     thumbnail: None,
                     resolution_tier: crate::resolution::ResolutionTier::High,
+                    moderation_tier: None,
+                    tags: Vec::new(),
                 }],
             }],
         };

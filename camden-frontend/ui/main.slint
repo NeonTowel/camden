@@ -7,6 +7,10 @@ export struct FileData {
     thumbnail: image,
     // Resolution tier: 0=High, 1=Mobile, 2=Low
     resolution_tier: int,
+    // AI moderation tier: "" (none), "Safe", "Sensitive", "Mature", "Restricted"
+    moderation_tier: string,
+    // AI-generated tags (up to 5)
+    tags: string,
 }
 
 export struct GroupData {
@@ -28,6 +32,7 @@ export component MainWindow inherits Window {
     in-out property <float> progress_phase: 0.0;
     in-out property <bool> rename_to_guid: false;
     in-out property <bool> detect_low_resolution: false;
+    in-out property <bool> enable_classification: false;
 
     callback browse_root();
     callback browse_target();
@@ -108,6 +113,12 @@ export component MainWindow inherits Window {
             CheckBox {
                 text: "Tag low quality photos";
                 checked <=> detect_low_resolution;
+                enabled: !scanning;
+            }
+
+            CheckBox {
+                text: "Classify images (AI)";
+                checked <=> enable_classification;
                 enabled: !scanning;
             }
         }
@@ -217,6 +228,60 @@ export component MainWindow inherits Window {
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
                                             }
+                                        }
+
+                                        // Moderation tier badge (if classified)
+                                        if file.moderation_tier == "Sensitive" : Rectangle {
+                                            height: 18px;
+                                            border-radius: 4px;
+                                            background: #f39c12;
+
+                                            Text {
+                                                text: "SENSITIVE";
+                                                font-size: 8pt;
+                                                font-weight: 700;
+                                                color: #ffffff;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        if file.moderation_tier == "Mature" : Rectangle {
+                                            height: 18px;
+                                            border-radius: 4px;
+                                            background: #e74c3c;
+
+                                            Text {
+                                                text: "MATURE";
+                                                font-size: 8pt;
+                                                font-weight: 700;
+                                                color: #ffffff;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        if file.moderation_tier == "Restricted" : Rectangle {
+                                            height: 18px;
+                                            border-radius: 4px;
+                                            background: #8e44ad;
+
+                                            Text {
+                                                text: "RESTRICTED";
+                                                font-size: 8pt;
+                                                font-weight: 700;
+                                                color: #ffffff;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        // Tags (if available)
+                                        if file.tags != "" : Text {
+                                            text: file.tags;
+                                            wrap: word-wrap;
+                                            font-size: 8pt;
+                                            color: #7f8c8d;
                                         }
                                     }
 

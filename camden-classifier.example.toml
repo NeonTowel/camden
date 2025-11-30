@@ -1,0 +1,223 @@
+# Camden AI Classifier Configuration
+# Copy this file to `camden-classifier.toml` and customize as needed.
+#
+# Models can be:
+# 1. Downloaded from ONNX Model Zoo (task deps-models)
+# 2. Converted from Hugging Face (python scripts/convert_hf_to_onnx.py)
+# 3. Downloaded pre-converted from HuggingFace ONNX repos
+
+# Base directory for model files (relative to workspace root)
+models_dir = ".vendor/models"
+
+# Path to ONNX Runtime library
+ort_library = ".vendor/onnxruntime/lib/onnxruntime.dll"
+
+# Active model selections (must reference model IDs below)
+active_moderation = "gantman-nsfw"
+active_tagging = "mobilenetv2"
+
+# ============================================================================
+# MODERATION MODELS
+# ============================================================================
+
+[models.gantman-nsfw]
+name = "GantMan NSFW (5-class)"
+type = "moderation"
+path = "nsfw-inception-v3.onnx"
+description = "5-class NSFW detection: drawings, hentai, neutral, porn, sexy"
+enabled = true
+
+[models.gantman-nsfw.input]
+width = 299
+height = 299
+normalize = false  # Model expects 0-1 range, not ImageNet normalization
+layout = "NCHW"
+
+[models.gantman-nsfw.output]
+num_classes = 5
+labels = ["drawings", "hentai", "neutral", "porn", "sexy"]
+
+# ============================================================================
+# HUGGING FACE PRE-CONVERTED ONNX MODELS (download with: task deps-models-hf)
+# No Python conversion required - ready to use!
+# ============================================================================
+
+# ONNX Community NSFW detector - ViT-based, 5-class (same as GantMan)
+# Source: https://huggingface.co/onnx-community/nsfw-image-detector-ONNX
+[models.onnx-community-nsfw]
+name = "ONNX Community NSFW (ViT)"
+type = "moderation"
+path = "onnx-community-nsfw.onnx"
+description = "5-class NSFW ViT, 343MB, high accuracy"
+enabled = true
+
+[models.onnx-community-nsfw.input]
+width = 224
+height = 224
+normalize = true
+layout = "NCHW"
+
+[models.onnx-community-nsfw.output]
+num_classes = 5
+labels = ["drawings", "hentai", "neutral", "porn", "sexy"]
+
+# NSFWJS - MobileNet-based, 5-class (fast, lightweight)
+# Source: https://huggingface.co/deepghs/imgutils-models
+[models.nsfwjs]
+name = "NSFWJS (MobileNet)"
+type = "moderation"
+path = "nsfwjs.onnx"
+description = "5-class NSFW MobileNet, 10MB, fastest inference"
+enabled = true
+
+[models.nsfwjs.input]
+width = 224
+height = 224
+normalize = false
+layout = "NCHW"
+
+[models.nsfwjs.output]
+num_classes = 5
+labels = ["drawings", "hentai", "neutral", "porn", "sexy"]
+
+# ViT-base ImageNet (1000 classes)
+# Source: https://huggingface.co/Xenova/vit-base-patch16-224
+[models.vit-base-224]
+name = "ViT-Base-224 (ImageNet)"
+type = "tagging"
+path = "vit-base-224.onnx"
+description = "Vision Transformer ImageNet 1000-class, ~347MB"
+enabled = true
+
+[models.vit-base-224.input]
+width = 224
+height = 224
+normalize = true
+layout = "NCHW"
+
+[models.vit-base-224.output]
+num_classes = 1000
+labels = []
+
+# ============================================================================
+# MODELS REQUIRING PYTHON CONVERSION
+# ============================================================================
+
+# Falconsai ViT-based NSFW detector (2-class, 98% accuracy)
+# Convert: python scripts/convert_hf_to_onnx.py -m Falconsai/nsfw_image_detection -o .vendor/models/falconsai-nsfw.onnx
+[models.falconsai-nsfw]
+name = "Falconsai NSFW (ViT)"
+type = "moderation"
+path = "falconsai-nsfw.onnx"
+description = "2-class NSFW, 98% accuracy (requires conversion)"
+enabled = false
+
+[models.falconsai-nsfw.input]
+width = 224
+height = 224
+normalize = true
+layout = "NCHW"
+
+[models.falconsai-nsfw.output]
+num_classes = 2
+labels = ["normal", "nsfw"]
+
+# ============================================================================
+# TAGGING MODELS (ImageNet classification)
+# ============================================================================
+
+[models.mobilenetv2]
+name = "MobileNetV2"
+type = "tagging"
+path = "mobilenetv2-12.onnx"
+description = "ImageNet 1000-class, ~14MB, fastest inference"
+enabled = true
+
+[models.mobilenetv2.input]
+width = 224
+height = 224
+normalize = true  # ImageNet normalization (mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+layout = "NCHW"
+
+[models.mobilenetv2.output]
+num_classes = 1000
+labels = []  # Uses built-in ImageNet labels
+
+# EfficientNet-Lite4: Higher accuracy, larger model
+# Download from: https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx
+[models.efficientnet-lite4]
+name = "EfficientNet-Lite4"
+type = "tagging"
+path = "efficientnet-lite4-11.onnx"
+description = "ImageNet 1000-class, ~50MB, higher accuracy (~80% top-1)"
+enabled = false  # Set to true after downloading
+
+[models.efficientnet-lite4.input]
+width = 300
+height = 300
+normalize = true
+layout = "NCHW"
+
+[models.efficientnet-lite4.output]
+num_classes = 1000
+labels = []
+
+# ResNet-50: Classic architecture, good balance
+# Download from: https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-v2-7.onnx
+[models.resnet50]
+name = "ResNet-50"
+type = "tagging"
+path = "resnet50-v2-7.onnx"
+description = "ImageNet 1000-class, ~100MB, classic architecture"
+enabled = false  # Set to true after downloading
+
+[models.resnet50.input]
+width = 224
+height = 224
+normalize = true
+layout = "NCHW"
+
+[models.resnet50.output]
+num_classes = 1000
+labels = []
+
+# ShuffleNetV2: Smallest and fastest, lower accuracy
+# [models.shufflenetv2]
+# name = "ShuffleNetV2"
+# type = "tagging"
+# path = "shufflenetv2-10.onnx"
+# description = "ImageNet 1000-class, ~9MB, fastest but lower accuracy"
+# enabled = false
+#
+# [models.shufflenetv2.input]
+# width = 224
+# height = 224
+# normalize = true
+# layout = "NCHW"
+
+# ============================================================================
+# MODEL PRESETS (for automatic download)
+# These are pre-configured models that can be downloaded with `task deps-models`
+# ============================================================================
+
+[[presets]]
+id = "gantman-nsfw"
+name = "GantMan NSFW (5-class)"
+url = "https://github.com/iola1999/nsfw-detect-onnx/releases/download/v1.0.0/model.onnx"
+size_bytes = 87000000
+
+[presets.config]
+name = "GantMan NSFW"
+type = "moderation"
+path = "nsfw-inception-v3.onnx"
+
+[[presets]]
+id = "mobilenetv2"
+name = "MobileNetV2 (ImageNet)"
+url = "https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx"
+size_bytes = 14000000
+
+[presets.config]
+name = "MobileNetV2"
+type = "tagging"
+path = "mobilenetv2-12.onnx"

@@ -1,4 +1,4 @@
-use camden_core::{ResolutionTier, ScanConfig, ScanSummary, ThreadingMode, move_paths, scan};
+use camden_core::{ResolutionTier, ScanConfig, ScanSummary, ThreadingMode, move_paths, scan, write_classification_report};
 use indicatif::ProgressBar;
 use slint::{Image, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -24,6 +24,8 @@ struct InternalFile {
     selected: bool,
     thumbnail: Option<PathBuf>,
     resolution_tier: ResolutionTier,
+    moderation_tier: String,
+    tags: String,
 }
 
 #[derive(Clone)]
@@ -77,7 +79,8 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 let rename_to_guid = ui.get_rename_to_guid();
                 let detect_low_resolution = ui.get_detect_low_resolution();
-                let config = build_scan_config(rename_to_guid, detect_low_resolution);
+                let enable_classification = ui.get_enable_classification();
+                let config = build_scan_config(rename_to_guid, detect_low_resolution, enable_classification);
 
                 let ui_weak = ui_weak.clone();
                 let state = Arc::clone(&state);
@@ -190,10 +193,18 @@ fn perform_scan(
     ui_weak: slint::Weak<MainWindow>,
 ) {
     let start_time = Instant::now();
+    let classification_enabled = config.enable_classification;
     let progress_bar = Arc::new(ProgressBar::hidden());
     let summary = scan(&root, &config, &progress_bar);
     let groups = map_summary(&summary);
     let duration = start_time.elapsed();
+
+    // Write classification report if classification was enabled
+    if classification_enabled {
+        if let Err(e) = write_classification_report(&summary, &root) {
+            eprintln!("Failed to write classification report: {}", e);
+        }
+    }
 
     if let Ok(mut state_mut) = state.lock() {
         state_mut.groups = groups;
@@ -213,13 +224,36 @@ fn perform_scan(
         .filter(|g| g.files.len() == 1 && g.files[0].resolution_tier == ResolutionTier::Low)
         .count();
 
-    let status = format!(
-        "Scan complete in {:.2}s: {} duplicates, {} mobile-only, {} low-res.",
-        duration.as_secs_f64(),
-        duplicate_count,
-        mobile_count,
-        low_res_count
-    );
+    // Count classified files
+    let classified_count = if classification_enabled {
+        summary
+            .groups
+            .iter()
+            .flat_map(|g| &g.files)
+            .filter(|f| f.moderation_tier.is_some())
+            .count()
+    } else {
+        0
+    };
+
+    let status = if classification_enabled && classified_count > 0 {
+        format!(
+            "Scan complete in {:.2}s: {} duplicates, {} mobile-only, {} low-res, {} classified.",
+            duration.as_secs_f64(),
+            duplicate_count,
+            mobile_count,
+            low_res_count,
+            classified_count
+        )
+    } else {
+        format!(
+            "Scan complete in {:.2}s: {} duplicates, {} mobile-only, {} low-res.",
+            duration.as_secs_f64(),
+            duplicate_count,
+            mobile_count,
+            low_res_count
+        )
+    };
 
     let state_clone = Arc::clone(&state);
     slint::invoke_from_event_loop(move || {
@@ -312,6 +346,8 @@ fn build_group_model(groups: &[InternalGroup]) -> ModelRc<GroupData> {
                         ResolutionTier::Mobile => 1,
                         ResolutionTier::Low => 2,
                     },
+                    moderation_tier: SharedString::from(file.moderation_tier.clone()),
+                    tags: SharedString::from(file.tags.clone()),
                 })
                 .collect();
             GroupData {
@@ -352,6 +388,8 @@ fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {
                         selected: false,
                         thumbnail: file.thumbnail.clone(),
                         resolution_tier: file.resolution_tier,
+                        moderation_tier: file.moderation_tier.clone().unwrap_or_default(),
+                        tags: file.tags.join(", "),
                     }
                 })
                 .collect();
@@ -409,6 +447,8 @@ mod tests {
             selected: false,
             thumbnail: None,
             resolution_tier: ResolutionTier::High,
+            moderation_tier: String::new(),
+            tags: String::new(),
         }
     }
 
@@ -552,7 +592,7 @@ fn format_status(state: &AppState) -> String {
     )
 }
 
-fn build_scan_config(rename_to_guid: bool, detect_low_resolution: bool) -> ScanConfig {
+fn build_scan_config(rename_to_guid: bool, detect_low_resolution: bool, enable_classification: bool) -> ScanConfig {
     let mut config = ScanConfig::new(default_extensions(), ThreadingMode::Parallel);
     if let Some(mut dir) = dirs::data_local_dir() {
         dir.push("Camden");
@@ -562,6 +602,7 @@ fn build_scan_config(rename_to_guid: bool, detect_low_resolution: bool) -> ScanC
     config
         .with_guid_rename(rename_to_guid)
         .with_low_resolution_detection(detect_low_resolution)
+        .with_classification(enable_classification)
 }
 
 fn default_extensions() -> Vec<String> {

@@ -118,6 +118,10 @@ pub struct ImageMetadata {
     pub confidence: f32,
     pub thumbnail: Option<PathBuf>,
     pub resolution_tier: ResolutionTier,
+    /// AI moderation tier (if classification was performed).
+    pub moderation_tier: Option<String>,
+    /// AI-generated tags (if classification was performed).
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -253,6 +257,8 @@ fn file_metadata(
         confidence: 1.0,
         thumbnail: None,
         resolution_tier: ResolutionTier::High,
+        moderation_tier: None,
+        tags: Vec::new(),
     })
 }
 
