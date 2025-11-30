@@ -70,6 +70,9 @@ impl ScanConfig {
 /// Maximum number of tags to keep per image.
 pub const MAX_TAGS_PER_IMAGE: usize = 5;
 
+/// Whether to include confidence scores in tag strings (e.g., "boat (85%)") for debugging.
+pub const DEBUG_SHOW_TAG_CONFIDENCE: bool = true;
+
 /// A file entry that belongs to a duplicate group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DuplicateEntry {
@@ -296,7 +299,19 @@ fn handle_entry(
                                 match clf.tag(&path, MAX_TAGS_PER_IMAGE) {
                                     Ok(tags) => {
                                         analysis.metadata.tags =
-                                            tags.into_iter().map(|t| t.label).collect();
+                                            tags.into_iter().map(|t| {
+                                                if DEBUG_SHOW_TAG_CONFIDENCE {
+                                                    let percentage = (t.confidence * 100.0).round() as u32;
+                                                    if percentage > 0 {
+                                                        format!("{} ({}%)", t.label, percentage)
+                                                    } else {
+                                                        // For very small confidences, show decimal percentage
+                                                        format!("{} ({:.2}%)", t.label, t.confidence * 100.0)
+                                                    }
+                                                } else {
+                                                    t.label
+                                                }
+                                            }).collect();
                                     }
                                     Err(e) => {
                                         progress_bar

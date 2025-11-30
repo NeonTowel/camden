@@ -8,6 +8,11 @@ use ort::session::Session;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// Minimum confidence threshold for tags (0.0-1.0).
+/// Tags below this threshold are filtered out.
+/// 0.6 = 60% confidence
+pub const MIN_TAG_CONFIDENCE: f32 = 0.6;
+
 /// Configuration for the tagging classifier.
 #[derive(Clone, Debug)]
 pub struct TaggingConfig {
@@ -103,14 +108,31 @@ impl TaggingClassifier {
             .ok_or_else(|| ClassifierError::Processing("no output tensor found".into()))?;
 
         // Extract as tuple (shape, data slice)
-        let (_, logits_slice) = output
+        let (shape, logits_slice) = output
             .try_extract_tensor::<f32>()
             .map_err(ClassifierError::Ort)?;
 
-        let logits: Vec<f32> = logits_slice.to_vec();
-
-        // Apply softmax
-        let probabilities = softmax(&logits);
+        // Flatten to 1D if needed (some models output [batch_size, num_classes])
+        let logits: Vec<f32> = if shape.len() > 1 && shape[0] == 1 {
+            // Output is [1, num_classes], extract just the class scores
+            logits_slice.to_vec()
+        } else if shape.len() > 1 {
+            // Unexpected shape, just use as is
+            logits_slice.to_vec()
+        } else {
+            logits_slice.to_vec()
+        };
+        
+        // Check if logits already sum to ~1.0 (indicating they're probabilities, not logits)
+        let logits_sum: f32 = logits.iter().sum();
+        let is_already_probabilities = (logits_sum - 1.0).abs() < 0.01; // Allow small tolerance
+        
+        // Apply softmax only if not already probabilities
+        let probabilities = if is_already_probabilities {
+            logits.clone()
+        } else {
+            softmax(&logits)
+        };
 
         // Get top-k predictions
         let mut indexed: Vec<(usize, f32)> = probabilities.into_iter().enumerate().collect();
@@ -119,7 +141,7 @@ impl TaggingClassifier {
         let tags: Vec<ImageTag> = indexed
             .into_iter()
             .take(max_tags)
-            .filter(|(_, score)| *score > 0.001) // Minimum confidence threshold (0.1%)
+            .filter(|(_, score)| *score >= MIN_TAG_CONFIDENCE) // Filter by confidence threshold
             .filter_map(|(idx, score)| {
                 IMAGENET_LABELS.get(idx).map(|label| {
                     let (category, clean_label) = categorize_label(label);
