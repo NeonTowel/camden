@@ -42,6 +42,8 @@ pub use moderation::{ModerationCategories, ModerationConfig, ModerationFlags, Mo
 pub use runtime::{ClassifierError, ModelPaths};
 pub use tagging::{ImageTag, TagCategory, TaggingClassifier, TaggingConfig};
 
+use csv::ReaderBuilder;
+use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -137,6 +139,7 @@ impl ImageClassifier {
     
     /// Create a classifier from a configuration.
     pub fn from_config(config: ClassifierConfig) -> Result<Self, ClassifierError> {
+        let models_dir = config.models_dir.clone();
         let moderation_path = config.active_moderation_path().ok_or_else(|| {
             ClassifierError::Processing("no active moderation model configured".to_string())
         })?;
@@ -159,7 +162,8 @@ impl ImageClassifier {
         // Get model-specific configuration for tagging
         let tagging = if let Some(model_config) = config.active_tagging_model() {
             let tag_config = TaggingConfig::from_specs(&model_config.input);
-            TaggingClassifier::with_config(&tagging_path, tag_config)?
+            let labels = load_tagging_labels(&models_dir, &model_config.output)?;
+            TaggingClassifier::with_config_and_labels(&tagging_path, tag_config, labels)?
         } else {
             TaggingClassifier::new(&tagging_path)?
         };
@@ -205,4 +209,83 @@ impl ImageClassifier {
 pub struct ClassificationResult {
     pub moderation: ModerationFlags,
     pub tags: Vec<ImageTag>,
+}
+
+fn load_tagging_labels(
+    models_dir: &Path,
+    output: &ModelOutputSpec,
+) -> Result<Vec<String>, ClassifierError> {
+    if !output.labels.is_empty() {
+        return Ok(output.labels.clone());
+    }
+
+    if let Some(labels_file) = &output.labels_file {
+        let label_path = if labels_file.is_absolute() {
+            labels_file.clone()
+        } else {
+            models_dir.join(labels_file)
+        };
+
+        if !label_path.exists() {
+            return Err(ClassifierError::ModelNotFound(label_path));
+        }
+
+        if let Some(ext) = label_path.extension().and_then(|s| s.to_str()) {
+            if ext.eq_ignore_ascii_case("csv") {
+                let mut reader = ReaderBuilder::new()
+                    .has_headers(true)
+                    .from_path(&label_path)
+                    .map_err(|e| {
+                        ClassifierError::Processing(format!(
+                            "failed to read labels CSV {}: {}",
+                            label_path.display(),
+                            e
+                        ))
+                    })?;
+
+                let mut labels = Vec::new();
+                for record in reader.records() {
+                    let record = record.map_err(|e| {
+                        ClassifierError::Processing(format!("invalid label record: {}", e))
+                    })?;
+                    if let Some(name) = record.get(1) {
+                        let trimmed = name.trim();
+                        if !trimmed.is_empty() {
+                            labels.push(trimmed.to_string());
+                        }
+                    }
+                }
+
+                if labels.is_empty() {
+                    return Err(ClassifierError::Processing(format!(
+                        "no labels found in {}",
+                        label_path.display()
+                    )));
+                }
+
+                return Ok(labels);
+            }
+        }
+
+        let content = fs::read_to_string(&label_path).map_err(|e| {
+            ClassifierError::Processing(format!(
+                "failed to read label file {}: {}",
+                label_path.display(),
+                e
+            ))
+        })?;
+
+        let parsed: Vec<String> = content
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .map(String::from)
+            .collect();
+
+        if !parsed.is_empty() {
+            return Ok(parsed);
+        }
+    }
+
+    Ok(TaggingClassifier::default_labels())
 }

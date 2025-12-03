@@ -35,6 +35,12 @@ pub struct ModelInputSpec {
     /// Input tensor layout (default: "NCHW")
     #[serde(default = "default_layout")]
     pub layout: String,
+    /// Optional custom normalization mean for the model.
+    #[serde(default)]
+    pub mean: Option<[f32; 3]>,
+    /// Optional custom normalization std for the model.
+    #[serde(default)]
+    pub std: Option<[f32; 3]>,
 }
 
 fn default_layout() -> String {
@@ -48,6 +54,8 @@ impl Default for ModelInputSpec {
             height: 224,
             normalize: true,
             layout: default_layout(),
+            mean: None,
+            std: None,
         }
     }
 }
@@ -184,6 +192,8 @@ impl Default for ClassifierConfig {
                     height: 299,
                     normalize: false, // 0-1 range, no ImageNet normalization
                     layout: "NHWC".to_string(),
+                    mean: None,
+                    std: None,
                 },
                 output: ModelOutputSpec {
                     num_classes: 5,
@@ -201,7 +211,7 @@ impl Default for ClassifierConfig {
                 enabled: true,
             },
         );
-        
+
         // Default tagging model: MobileNetV2
         models.insert(
             "mobilenetv2".to_string(),
@@ -214,6 +224,8 @@ impl Default for ClassifierConfig {
                     height: 224,
                     normalize: true, // ImageNet normalization
                     layout: "NCHW".to_string(),
+                    mean: None,
+                    std: None,
                 },
                 output: ModelOutputSpec {
                     num_classes: 1000,
@@ -225,6 +237,182 @@ impl Default for ClassifierConfig {
                 enabled: true,
             },
         );
+
+        // Additional HuggingFace models
+        models.insert(
+            "adamcodd-vit-nsfw".to_string(),
+            ModelConfig {
+                name: "AdamCodd ViT NSFW".to_string(),
+                model_type: ModelType::Moderation,
+                path: PathBuf::from("adamcodd-vit-base-nsfw.onnx"),
+                input: ModelInputSpec {
+                    width: 384,
+                    height: 384,
+                    normalize: true,
+                    layout: "NCHW".to_string(),
+                    mean: None,
+                    std: None,
+                },
+                output: ModelOutputSpec {
+                    num_classes: 2,
+                    labels: vec!["nsfw".to_string(), "sfw".to_string()],
+                    labels_file: None,
+                    format: Some("nsfw_sfw".to_string()),
+                },
+                description: "AdamCodd ViT NSFW detector (nsfw/sfw), 384x384".to_string(),
+                enabled: false,
+            },
+        );
+
+        models.insert(
+            "falconsai-nsfw".to_string(),
+            ModelConfig {
+                name: "Falconsai NSFW".to_string(),
+                model_type: ModelType::Moderation,
+                path: PathBuf::from("falconsai-nsfw.onnx"),
+                input: ModelInputSpec {
+                    width: 224,
+                    height: 224,
+                    normalize: true,
+                    layout: "NCHW".to_string(),
+                    mean: None,
+                    std: None,
+                },
+                output: ModelOutputSpec {
+                    num_classes: 2,
+                    labels: vec!["normal".to_string(), "nsfw".to_string()],
+                    labels_file: None,
+                    format: Some("normal_nsfw".to_string()),
+                },
+                description: "Falconsai NSFW detector (normal/nsfw), 224x224, 98% accuracy".to_string(),
+                enabled: false,
+            },
+        );
+
+        models.insert(
+            "spiele-nsfw".to_string(),
+            ModelConfig {
+                name: "spiele NSFW Detector".to_string(),
+                model_type: ModelType::Moderation,
+                path: PathBuf::from("spiele-nsfw.onnx"),
+                input: ModelInputSpec {
+                    width: 448,
+                    height: 448,
+                    normalize: true,
+                    layout: "NCHW".to_string(),
+                    mean: Some([0.5, 0.5, 0.5]),
+                    std: Some([0.5, 0.5, 0.5]),
+                },
+                output: ModelOutputSpec {
+                    num_classes: 4,
+                    labels: vec![
+                        "neutral".to_string(),
+                        "sensitive".to_string(),
+                        "mature".to_string(),
+                        "nsfw-restricted".to_string(),
+                    ],
+                    labels_file: None,
+                    format: None,
+                },
+                description: "spiele ViT-based NSFW severity detector (neutral → high)".to_string(),
+                enabled: false,
+            },
+        );
+
+        models.insert(
+            "taufiqdp-mobilenetv4".to_string(),
+            ModelConfig {
+                name: "TaufiqDP MobileNetV4 NSFW".to_string(),
+                model_type: ModelType::Moderation,
+                path: PathBuf::from(
+                    "taufiqdp-mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx",
+                ),
+                input: ModelInputSpec {
+                    width: 224,
+                    height: 224,
+                    normalize: true,
+                    layout: "NCHW".to_string(),
+                    mean: None,
+                    std: None,
+                },
+                output: ModelOutputSpec {
+                    num_classes: 5,
+                    labels: vec![
+                        "drawings".to_string(),
+                        "hentai".to_string(),
+                        "neutral".to_string(),
+                        "porn".to_string(),
+                        "sexy".to_string(),
+                    ],
+                    labels_file: None,
+                    format: Some("gantman".to_string()),
+                },
+                description: "TaufiqDP MobileNetV4 NSFW (GantMan 5-class)".to_string(),
+                enabled: false,
+            },
+        );
+
+        // ConvNeXtV2 Large - ImageNet 1000-class tagging (Xenova)
+        models.insert(
+            "convnextv2-large".to_string(),
+            ModelConfig {
+                name: "ConvNeXtV2 Large".to_string(),
+                model_type: ModelType::Tagging,
+                path: PathBuf::from("convnextv2-large-1k-224.onnx"),
+                input: ModelInputSpec {
+                    width: 224,
+                    height: 224,
+                    normalize: true,
+                    layout: "NCHW".to_string(),
+                    mean: None,
+                    std: None,
+                },
+                output: ModelOutputSpec {
+                    num_classes: 1000,
+                    labels: Vec::new(),
+                    labels_file: None,
+                    format: None,
+                },
+                description: "ConvNeXtV2 Large ImageNet 1000-class (Xenova, quantized)".to_string(),
+                enabled: false,
+            },
+        );
+
+        // WD Taggers share the same label set
+        let wd_label_file = PathBuf::from("wd-tags.csv");
+
+        for (id, name) in [
+            ("wd-vit-tagger-v3", "WD ViT Tagger V3"),
+            ("wd-vit-large-tagger-v3", "WD ViT Large Tagger V3"),
+            ("wd-swinv2-tagger-v3", "WD SwinV2 Tagger V3"),
+            ("wd-eva02-large-tagger-v3", "WD EVA02 Large Tagger V3"),
+            ("p1atdev-wd-swinv2-tagger-v3-hf", "p1atdev WD SwinV2 Tagger V3 (HF)"),
+        ] {
+            models.insert(
+                id.to_string(),
+                ModelConfig {
+                    name: name.to_string(),
+                    model_type: ModelType::Tagging,
+                    path: PathBuf::from(format!("{}.onnx", id)),
+                    input: ModelInputSpec {
+                        width: 448,
+                        height: 448,
+                        normalize: true,
+                        layout: "NCHW".to_string(),
+                        mean: Some([0.5, 0.5, 0.5]),
+                        std: Some([0.5, 0.5, 0.5]),
+                    },
+                    output: ModelOutputSpec {
+                        num_classes: 10861,
+                        labels: Vec::new(),
+                        labels_file: Some(wd_label_file.clone()),
+                        format: None,
+                    },
+                    description: format!("{name} (Danbooru-style tagger)"),
+                    enabled: false,
+                },
+            );
+        }
         
         Self {
             models_dir: default_models_dir(),
@@ -367,6 +555,8 @@ impl ClassifierConfig {
                         height: 299,
                         normalize: false,
                         layout: "NHWC".to_string(),
+                        mean: None,
+                        std: None,
                     },
                     output: ModelOutputSpec {
                         num_classes: 5,
@@ -400,6 +590,8 @@ impl ClassifierConfig {
                         height: 224,
                         normalize: true,
                         layout: "NCHW".to_string(),
+                        mean: None,
+                        std: None,
                     },
                     output: ModelOutputSpec {
                         num_classes: 1000,
@@ -426,6 +618,8 @@ impl ClassifierConfig {
                         height: 300,
                         normalize: true,
                         layout: "NCHW".to_string(),
+                        mean: None,
+                        std: None,
                     },
                     output: ModelOutputSpec {
                         num_classes: 1000,
@@ -452,6 +646,8 @@ impl ClassifierConfig {
                         height: 224,
                         normalize: true,
                         layout: "NCHW".to_string(),
+                        mean: None,
+                        std: None,
                     },
                     output: ModelOutputSpec {
                         num_classes: 1000,

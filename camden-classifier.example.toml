@@ -100,17 +100,19 @@ num_classes = 1000
 labels = []
 
 # ============================================================================
-# MODELS REQUIRING PYTHON CONVERSION
+# ADDITIONAL HUGGING FACE MODERATION MODELS
+# Download: task deps-models-hf (no Python conversion required)
 # ============================================================================
 
 # Falconsai ViT-based NSFW detector (2-class, 98% accuracy)
-# Convert: python scripts/convert_hf_to_onnx.py -m Falconsai/nsfw_image_detection -o .vendor/models/falconsai-nsfw.onnx
+# Source: https://huggingface.co/Falconsai/nsfw_image_detection
+# Download: task deps-models-hf
 [models.falconsai-nsfw]
 name = "Falconsai NSFW (ViT)"
 type = "moderation"
 path = "falconsai-nsfw.onnx"
-description = "2-class NSFW, 98% accuracy (requires conversion)"
-enabled = false
+description = "2-class NSFW, 98% accuracy, 224x224"
+enabled = true
 
 [models.falconsai-nsfw.input]
 width = 224
@@ -121,10 +123,52 @@ layout = "NCHW"
 [models.falconsai-nsfw.output]
 num_classes = 2
 labels = ["normal", "nsfw"]
+format = "normal_nsfw"
+
+# AdamCodd ViT-based NSFW detector (2-class, higher resolution)
+# Source: https://huggingface.co/AdamCodd/vit-base-nsfw-detector
+# Download: task deps-models-hf
+[models.adamcodd-vit-nsfw]
+name = "AdamCodd ViT NSFW"
+type = "moderation"
+path = "adamcodd-vit-base-nsfw.onnx"
+description = "2-class NSFW, 384x384 high resolution"
+enabled = true
+
+[models.adamcodd-vit-nsfw.input]
+width = 384
+height = 384
+normalize = true
+layout = "NCHW"
+
+[models.adamcodd-vit-nsfw.output]
+num_classes = 2
+labels = ["nsfw", "sfw"]
+format = "nsfw_sfw"
 
 # ============================================================================
 # TAGGING MODELS (ImageNet classification)
 # ============================================================================
+
+# ConvNeXtV2 Large - High accuracy ImageNet 1000-class
+# Source: https://huggingface.co/Xenova/convnextv2-large-1k-224
+# Download: task deps-models-hf
+[models.convnextv2-large]
+name = "ConvNeXtV2 Large"
+type = "tagging"
+path = "convnextv2-large-1k-224.onnx"
+description = "ImageNet 1000-class, quantized, high accuracy"
+enabled = true
+
+[models.convnextv2-large.input]
+width = 224
+height = 224
+normalize = true
+layout = "NCHW"
+
+[models.convnextv2-large.output]
+num_classes = 1000
+labels = []
 
 [models.mobilenetv2]
 name = "MobileNetV2"

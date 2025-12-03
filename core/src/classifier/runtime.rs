@@ -47,6 +47,12 @@ impl ModelPaths {
     }
 }
 
+/// Default ImageNet normalization mean (RGB order).
+pub const IMAGE_NET_MEAN: [f32; 3] = [0.485, 0.456, 0.406];
+
+/// Default ImageNet normalization standard deviation (RGB order).
+pub const IMAGE_NET_STD: [f32; 3] = [0.229, 0.224, 0.225];
+
 /// Load an ONNX session from a model file.
 pub fn load_session(model_path: &Path) -> Result<Session, ClassifierError> {
     if !model_path.exists() {
@@ -75,7 +81,14 @@ pub fn preprocess_image(
     target_size: (i32, i32),
     normalize: bool,
 ) -> Result<Array4<f32>, ClassifierError> {
-    preprocess_image_with_layout(image_path, target_size, normalize, "NCHW")
+    preprocess_image_with_layout(
+        image_path,
+        target_size,
+        normalize,
+        "NCHW",
+        IMAGE_NET_MEAN,
+        IMAGE_NET_STD,
+    )
 }
 
 /// Preprocess an image with configurable layout.
@@ -84,6 +97,8 @@ pub fn preprocess_image_with_layout(
     target_size: (i32, i32),
     normalize: bool,
     layout: &str,
+    mean: [f32; 3],
+    std: [f32; 3],
 ) -> Result<Array4<f32>, ClassifierError> {
     use opencv::core::{Mat, MatTraitConst, MatTraitConstManual, Size, CV_32FC3};
     use opencv::imgcodecs;
@@ -145,12 +160,7 @@ pub fn preprocess_image_with_layout(
         // Add batch dimension -> NHWC [1, H, W, C]
         let nhwc = hwc.insert_axis(ndarray::Axis(0));
         
-        // For NHWC, normalization would need different slicing
-        // Most NHWC models (TensorFlow) expect 0-255 or 0-1 range without ImageNet norm
         if normalize {
-            // For NHWC, apply per-channel normalization differently
-            let mean = [0.485f32, 0.456, 0.406];
-            let std = [0.229f32, 0.224, 0.225];
             let mut normalized = nhwc.into_owned();
             for c in 0..3 {
                 normalized
@@ -169,12 +179,7 @@ pub fn preprocess_image_with_layout(
         // Add batch dimension -> NCHW
         let nchw = chw.insert_axis(ndarray::Axis(0));
 
-        // Apply ImageNet normalization if requested
         if normalize {
-            // Standard ImageNet normalization
-            let mean = [0.485f32, 0.456, 0.406];
-            let std = [0.229f32, 0.224, 0.225];
-
             let mut normalized = nchw.into_owned();
             for c in 0..3 {
                 normalized

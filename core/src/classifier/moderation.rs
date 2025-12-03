@@ -6,7 +6,10 @@
 //! - AdamCodd 2-class: nsfw, sfw (384x384)
 
 use super::config::ModelInputSpec;
-use super::runtime::{load_session, preprocess_image_with_layout, softmax, ClassifierError};
+use super::runtime::{
+    load_session, preprocess_image_with_layout, softmax, ClassifierError, IMAGE_NET_MEAN,
+    IMAGE_NET_STD,
+};
 use ort::session::Session;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -70,6 +73,10 @@ pub struct ModerationConfig {
     pub normalize: bool,
     /// Input tensor layout (NCHW or NHWC)
     pub layout: String,
+    /// Normalization mean to apply when `normalize` is true.
+    pub normalization_mean: [f32; 3],
+    /// Normalization std to apply when `normalize` is true.
+    pub normalization_std: [f32; 3],
     /// Model format for output interpretation
     pub format: ModerationModelFormat,
 }
@@ -81,6 +88,8 @@ impl Default for ModerationConfig {
             input_height: 299,
             normalize: false,
             layout: "NHWC".to_string(),
+            normalization_mean: IMAGE_NET_MEAN,
+            normalization_std: IMAGE_NET_STD,
             format: ModerationModelFormat::GantMan5Class,
         }
     }
@@ -94,6 +103,8 @@ impl ModerationConfig {
             input_height: input.height,
             normalize: input.normalize,
             layout: input.layout.clone(),
+            normalization_mean: input.mean.unwrap_or(IMAGE_NET_MEAN),
+            normalization_std: input.std.unwrap_or(IMAGE_NET_STD),
             format: ModerationModelFormat::from_config(format_hint, labels),
         }
     }
@@ -127,6 +138,8 @@ impl NsfwClassifier {
             input_size,
             self.config.normalize,
             &self.config.layout,
+            self.config.normalization_mean,
+            self.config.normalization_std,
         )?;
 
         // Get input name from model

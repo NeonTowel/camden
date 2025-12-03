@@ -3,7 +3,10 @@
 //! Supports multiple ImageNet-based models with configurable input sizes and normalization.
 
 use super::config::ModelInputSpec;
-use super::runtime::{load_session, preprocess_image_with_layout, softmax, ClassifierError};
+use super::runtime::{
+    load_session, preprocess_image_with_layout, softmax, ClassifierError, IMAGE_NET_MEAN,
+    IMAGE_NET_STD,
+};
 use ort::session::Session;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -24,6 +27,10 @@ pub struct TaggingConfig {
     pub normalize: bool,
     /// Input tensor layout ("NCHW" or "NHWC")
     pub layout: String,
+    /// Normalization mean to apply when `normalize` is true.
+    pub normalization_mean: [f32; 3],
+    /// Normalization std to apply when `normalize` is true.
+    pub normalization_std: [f32; 3],
 }
 
 impl Default for TaggingConfig {
@@ -33,6 +40,8 @@ impl Default for TaggingConfig {
             input_height: 224,
             normalize: true,
             layout: "NCHW".to_string(),
+            normalization_mean: IMAGE_NET_MEAN,
+            normalization_std: IMAGE_NET_STD,
         }
     }
 }
@@ -45,6 +54,8 @@ impl TaggingConfig {
             input_height: input.height,
             normalize: input.normalize,
             layout: input.layout.clone(),
+            normalization_mean: input.mean.unwrap_or(IMAGE_NET_MEAN),
+            normalization_std: input.std.unwrap_or(IMAGE_NET_STD),
         }
     }
 }
@@ -53,18 +64,36 @@ impl TaggingConfig {
 pub struct TaggingClassifier {
     session: Session,
     config: TaggingConfig,
+    labels: Vec<String>,
 }
 
 impl TaggingClassifier {
     /// Load the tagging classifier from an ONNX model file with default config.
     pub fn new(model_path: &Path) -> Result<Self, ClassifierError> {
-        Self::with_config(model_path, TaggingConfig::default())
+        Self::with_config_and_labels(
+            model_path,
+            TaggingConfig::default(),
+            Self::default_labels(),
+        )
     }
 
     /// Load the tagging classifier with custom configuration.
     pub fn with_config(model_path: &Path, config: TaggingConfig) -> Result<Self, ClassifierError> {
+        Self::with_config_and_labels(model_path, config, Self::default_labels())
+    }
+
+    /// Load the tagging classifier with custom configuration and label set.
+    pub fn with_config_and_labels(
+        model_path: &Path,
+        config: TaggingConfig,
+        labels: Vec<String>,
+    ) -> Result<Self, ClassifierError> {
         let session = load_session(model_path)?;
-        Ok(Self { session, config })
+        Ok(Self {
+            session,
+            config,
+            labels,
+        })
     }
 
     /// Classify an image and return the top tags.
@@ -81,6 +110,9 @@ impl TaggingClassifier {
             input_size, 
             self.config.normalize,
             &self.config.layout
+            ,
+            self.config.normalization_mean,
+            self.config.normalization_std,
         )?;
 
         // Get input name from model
@@ -143,7 +175,7 @@ impl TaggingClassifier {
             .take(max_tags)
             .filter(|(_, score)| *score >= MIN_TAG_CONFIDENCE) // Filter by confidence threshold
             .filter_map(|(idx, score)| {
-                IMAGENET_LABELS.get(idx).map(|label| {
+                self.labels.get(idx).map(|label| {
                     let (category, clean_label) = categorize_label(label);
                     ImageTag {
                         name: clean_label.to_lowercase().replace(' ', "-"),
@@ -156,6 +188,10 @@ impl TaggingClassifier {
             .collect();
 
         Ok(tags)
+    }
+
+    pub(super) fn default_labels() -> Vec<String> {
+        IMAGENET_LABELS.iter().map(|label| label.to_string()).collect()
     }
 }
 

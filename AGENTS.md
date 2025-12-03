@@ -31,3 +31,10 @@ Taskfile sets environment variables for isolated dependencies (OpenCV, vcpkg in 
 - Prefer immutability; use `thiserror`/`anyhow` for error types
 - Keep modules small and focused; document public APIs with `///` doc comments
 - Naming: snake_case for functions/variables, PascalCase for types, SCREAMING_SNAKE for constants
+
+## Workflow & Investigation Principles
+- Prefer `task` targets (`task check`, `task build`, `task test`, `task fmt`, `task frontend`, etc.) so dotenv-provided environment variables (OpenCV, vcpkg) load correctly; only run cargo/bun directly if the Taskfile lacks the needed target and the user agrees.
+- Always ground yourself in context before coding: list files, understand configs/env vars/dependencies, question unclear requirements, and plan what you are changing and why.
+- Challenge assumptions up front by clarifying inputs, outputs, and constraints, and consider UX/maintainability impacts across CLI/frontend.
+- Keep code modular, testable, DRY, and idiomatic; prefer self-documenting patterns, handle edge cases cleanly, and avoid unnecessary comments unless existing style relies on them for public API documentation.
+- Think beyond single files; align frontend, backend, and tooling interactions, and watch for scope creep before executing.

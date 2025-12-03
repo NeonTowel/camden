@@ -77,6 +77,8 @@ python scripts/convert_hf_to_onnx.py \
 |-------|----------------|---------|----------|
 | **Falconsai NSFW** | `Falconsai/nsfw_image_detection` | normal, nsfw | 98% |
 | **AdamCodd NSFW** | `AdamCodd/vit-base-nsfw-detector` | sfw, nsfw | 96.5% |
+| **spiele NSFW** | `spiele/nsfw_image_detector-ONNX` | sfw, nsfw | >96% |
+| **TaufiqDP MobileNetV4 NSFW** | `taufiqdp/mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier` | sfw, nsfw | ~95% |
 
 #### Image Classification
 
@@ -85,6 +87,11 @@ python scripts/convert_hf_to_onnx.py \
 | **ViT-Base** | `google/vit-base-patch16-224` | ImageNet 1K | Best accuracy |
 | **ConvNeXt-Tiny** | `facebook/convnext-tiny-224` | ImageNet 1K | Good balance |
 | **SwinV2** | `microsoft/swinv2-tiny-patch4-window8-256` | ImageNet 1K | Latest architecture |
+| **WD ViT Tagger V3** | `SmilingWolf/wd-vit-tagger-v3` | Tagging | Light ViT, made for CLIP-style tags |
+| **WD ViT Large Tagger V3** | `SmilingWolf/wd-vit-large-tagger-v3` | Tagging | Larger ViT variant, more labels |
+| **WD SwinV2 Tagger V3** | `SmilingWolf/wd-swinv2-tagger-v3` | Tagging | Swin Transformer backbone |
+| **WD EVA02 Large Tagger V3** | `SmilingWolf/wd-eva02-large-tagger-v3` | Tagging | EVA02 backbone, wide tag coverage |
+| **WD SwinV2 Tagger V3 HF** | `p1atdev/wd-swinv2-tagger-v3-hf` | Tagging | HuggingFace-converted SwinV2 tagger |
 
 ### Pre-converted ONNX Models on HuggingFace
 
