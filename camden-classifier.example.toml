@@ -1,267 +1,140 @@
 # Camden AI Classifier Configuration
+#
 # Copy this file to `camden-classifier.toml` and customize as needed.
 #
-# Models can be:
-# 1. Downloaded from ONNX Model Zoo (task deps-models)
-# 2. Converted from Hugging Face (python scripts/convert_hf_to_onnx.py)
-# 3. Downloaded pre-converted from HuggingFace ONNX repos
+# Simply specify which models to use by name.
+# All model definitions are built into the application.
 
-# Base directory for model files (relative to workspace root)
-models_dir = ".vendor/models"
-
-# Path to ONNX Runtime library
-ort_library = ".vendor/onnxruntime/lib/onnxruntime.dll"
-
-# Active model selections (must reference model IDs below)
-active_moderation = "gantman-nsfw"
-active_tagging = "mobilenetv2"
-
-# ============================================================================
-# MODERATION MODELS
-# ============================================================================
-
-[models.gantman-nsfw]
-name = "GantMan NSFW (5-class)"
-type = "moderation"
-path = "nsfw-inception-v3.onnx"
-description = "5-class NSFW detection: drawings, hentai, neutral, porn, sexy"
-enabled = true
-
-[models.gantman-nsfw.input]
-width = 299
-height = 299
-normalize = false  # Model expects 0-1 range, not ImageNet normalization
-layout = "NHWC"
-
-[models.gantman-nsfw.output]
-num_classes = 5
-labels = ["drawings", "hentai", "neutral", "porn", "sexy"]
-
-# ============================================================================
-# HUGGING FACE PRE-CONVERTED ONNX MODELS (download with: task deps-models-hf)
-# No Python conversion required - ready to use!
-# ============================================================================
-
-# ONNX Community NSFW detector - ViT-based, 5-class (same as GantMan)
-# Source: https://huggingface.co/onnx-community/nsfw-image-detector-ONNX
-[models.onnx-community-nsfw]
-name = "ONNX Community NSFW (ViT)"
-type = "moderation"
-path = "onnx-community-nsfw.onnx"
-description = "5-class NSFW ViT, 343MB, high accuracy"
-enabled = true
-
-[models.onnx-community-nsfw.input]
-width = 224
-height = 224
-normalize = true
-layout = "NCHW"
-
-[models.onnx-community-nsfw.output]
-num_classes = 5
-labels = ["drawings", "hentai", "neutral", "porn", "sexy"]
-
-# NSFWJS - MobileNet-based, 5-class (fast, lightweight)
-# Source: https://huggingface.co/deepghs/imgutils-models
-[models.nsfwjs]
-name = "NSFWJS (MobileNet)"
-type = "moderation"
-path = "nsfwjs.onnx"
-description = "5-class NSFW MobileNet, 10MB, fastest inference"
-enabled = true
-
-[models.nsfwjs.input]
-width = 224
-height = 224
-normalize = false
-layout = "NHWC"
-
-[models.nsfwjs.output]
-num_classes = 5
-labels = ["drawings", "hentai", "neutral", "porn", "sexy"]
-
-# ViT-base ImageNet (1000 classes)
-# Source: https://huggingface.co/Xenova/vit-base-patch16-224
-[models.vit-base-224]
-name = "ViT-Base-224 (ImageNet)"
-type = "tagging"
-path = "vit-base-224.onnx"
-description = "Vision Transformer ImageNet 1000-class, ~347MB"
-enabled = true
-
-[models.vit-base-224.input]
-width = 224
-height = 224
-normalize = true
-layout = "NCHW"
-
-[models.vit-base-224.output]
-num_classes = 1000
-labels = []
-
-# ============================================================================
-# ADDITIONAL HUGGING FACE MODERATION MODELS
-# Download: task deps-models-hf (no Python conversion required)
-# ============================================================================
-
-# Falconsai ViT-based NSFW detector (2-class, 98% accuracy)
-# Source: https://huggingface.co/Falconsai/nsfw_image_detection
-# Download: task deps-models-hf
-[models.falconsai-nsfw]
-name = "Falconsai NSFW (ViT)"
-type = "moderation"
-path = "falconsai-nsfw.onnx"
-description = "2-class NSFW, 98% accuracy, 224x224"
-enabled = true
-
-[models.falconsai-nsfw.input]
-width = 224
-height = 224
-normalize = true
-layout = "NCHW"
-
-[models.falconsai-nsfw.output]
-num_classes = 2
-labels = ["normal", "nsfw"]
-format = "normal_nsfw"
-
-# AdamCodd ViT-based NSFW detector (2-class, higher resolution)
-# Source: https://huggingface.co/AdamCodd/vit-base-nsfw-detector
-# Download: task deps-models-hf
-[models.adamcodd-vit-nsfw]
-name = "AdamCodd ViT NSFW"
-type = "moderation"
-path = "adamcodd-vit-base-nsfw.onnx"
-description = "2-class NSFW, 384x384 high resolution"
-enabled = true
-
-[models.adamcodd-vit-nsfw.input]
-width = 384
-height = 384
-normalize = true
-layout = "NCHW"
-
-[models.adamcodd-vit-nsfw.output]
-num_classes = 2
-labels = ["nsfw", "sfw"]
-format = "nsfw_sfw"
-
-# ============================================================================
-# TAGGING MODELS (ImageNet classification)
-# ============================================================================
-
-# ConvNeXtV2 Large - High accuracy ImageNet 1000-class
-# Source: https://huggingface.co/Xenova/convnextv2-large-1k-224
-# Download: task deps-models-hf
-[models.convnextv2-large]
-name = "ConvNeXtV2 Large"
-type = "tagging"
-path = "convnextv2-large-1k-224.onnx"
-description = "ImageNet 1000-class, quantized, high accuracy"
-enabled = true
-
-[models.convnextv2-large.input]
-width = 224
-height = 224
-normalize = true
-layout = "NCHW"
-
-[models.convnextv2-large.output]
-num_classes = 1000
-labels = []
-
-[models.mobilenetv2]
-name = "MobileNetV2"
-type = "tagging"
-path = "mobilenetv2-12.onnx"
-description = "ImageNet 1000-class, ~14MB, fastest inference"
-enabled = true
-
-[models.mobilenetv2.input]
-width = 224
-height = 224
-normalize = true  # ImageNet normalization (mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-layout = "NCHW"
-
-[models.mobilenetv2.output]
-num_classes = 1000
-labels = []  # Uses built-in ImageNet labels
-
-# EfficientNet-Lite4: Higher accuracy, larger model
-# Download from: https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx
-[models.efficientnet-lite4]
-name = "EfficientNet-Lite4"
-type = "tagging"
-path = "efficientnet-lite4-11.onnx"
-description = "ImageNet 1000-class, ~50MB, higher accuracy (~80% top-1)"
-enabled = false  # Set to true after downloading
-
-[models.efficientnet-lite4.input]
-width = 300
-height = 300
-normalize = true
-layout = "NCHW"
-
-[models.efficientnet-lite4.output]
-num_classes = 1000
-labels = []
-
-# ResNet-50: Classic architecture, good balance
-# Download from: https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-v2-7.onnx
-[models.resnet50]
-name = "ResNet-50"
-type = "tagging"
-path = "resnet50-v2-7.onnx"
-description = "ImageNet 1000-class, ~100MB, classic architecture"
-enabled = false  # Set to true after downloading
-
-[models.resnet50.input]
-width = 224
-height = 224
-normalize = true
-layout = "NCHW"
-
-[models.resnet50.output]
-num_classes = 1000
-labels = []
-
-# ShuffleNetV2: Smallest and fastest, lower accuracy
-# [models.shufflenetv2]
-# name = "ShuffleNetV2"
-# type = "tagging"
-# path = "shufflenetv2-10.onnx"
-# description = "ImageNet 1000-class, ~9MB, fastest but lower accuracy"
-# enabled = false
+# =============================================================================
+# BASIC CONFIGURATION
+# =============================================================================
 #
-# [models.shufflenetv2.input]
+# Just pick the models you want to use:
+
+moderation_model = "gantman-nsfw"
+tagging_model = "wd-vit-tagger-v3"
+
+# =============================================================================
+# AVAILABLE MODERATION MODELS
+# =============================================================================
+#
+# gantman-nsfw       5-class NSFW detection (drawings, hentai, neutral, porn, sexy)
+#                    File: nsfw-inception-v3.onnx (~89 MB)
+#                    Input: 299x299, NHWC layout
+#                    DEFAULT - Good balance of accuracy and speed
+#
+# adamcodd-vit-nsfw  ViT-based NSFW detector (nsfw/sfw), high accuracy
+#                    File: adamcodd-vit-base-nsfw.onnx (~344 MB)
+#                    Input: 384x384, NCHW layout
+#                    Best accuracy for binary NSFW detection
+#
+# nsfwjs             Lightweight NSFW detector (GantMan 5-class)
+#                    File: nsfwjs.onnx (~10 MB)
+#                    Input: 224x224, NHWC layout
+#                    Fastest option, good for batch processing
+#
+# onnx-community-nsfw  ViT-based binary NSFW (nsfw/sfw)
+#                    File: onnx-community-nsfw.onnx (~343 MB)
+#                    Input: 224x224, NCHW layout
+#
+# spiele-nsfw        4-tier severity detector (neutral, sensitive, mature, restricted)
+#                    File: spiele-nsfw.onnx (~346 MB)
+#                    Input: 448x448, NCHW layout
+#                    Best for content rating systems
+#
+# taufiqdp-mobilenetv4  MobileNetV4-based NSFW (GantMan 5-class compatible)
+#                    File: taufiqdp-mobilenetv4_conv_small...onnx (~10 MB)
+#                    Input: 224x224, NCHW layout
+#                    Fast mobile-optimized model
+
+# =============================================================================
+# AVAILABLE TAGGING MODELS
+# =============================================================================
+#
+# ImageNet Models (1000 classes - objects, animals, scenes):
+# ----------------------------------------------------------
+# NOTE: ImageNet models classify into 1000 categories like "golden retriever",
+# "sports car", "pizza". Good for object identification, not rich tagging.
+#
+# mobilenetv2        Fast ImageNet classification
+#                    File: mobilenetv2-12.onnx (~14 MB)
+#                    Input: 224x224, NCHW layout
+#
+# efficientnet-lite4 Higher accuracy ImageNet
+#                    File: efficientnet-lite4-11.onnx (~52 MB)
+#                    Input: 224x224, NCHW layout
+#
+# resnet50           Classic ResNet architecture
+#                    File: resnet50-v2-7.onnx (~102 MB)
+#                    Input: 224x224, NCHW layout
+#
+# vit-base-224       Vision Transformer (ViT) ImageNet
+#                    File: vit-base-224.onnx (~346 MB)
+#                    Input: 224x224, NCHW layout
+#
+# vit-base-224-q8    Vision Transformer quantized (faster, smaller)
+#                    File: vit-base-224-q8.onnx (~88 MB)
+#                    Input: 224x224, NCHW layout
+#
+# convnextv2-large   ConvNeXtV2 Large, high accuracy
+#                    File: convnextv2-large-1k-224.onnx (~200 MB)
+#                    Input: 224x224, NCHW layout
+#
+# Danbooru-style Taggers (10,000+ tags - RECOMMENDED for rich tagging):
+# ---------------------------------------------------------------------
+# NOTE: WD taggers provide detailed multi-label tagging with 10,861 tags
+# covering characters, styles, compositions, colors, and more.
+# Best for anime/artwork but also works for general images.
+#
+# wd-vit-tagger-v3       WD ViT Tagger V3 (RECOMMENDED)
+#                        File: wd-vit-tagger-v3.onnx (~378 MB)
+#                        Input: 448x448, NHWC layout
+#
+# wd-swinv2-tagger-v3    WD SwinV2 Tagger V3
+#                        File: wd-swinv2-tagger-v3.onnx (~467 MB)
+#                        Input: 448x448, NHWC layout
+#
+# wd-vit-large-tagger-v3 WD ViT Large Tagger V3 (highest accuracy)
+#                        File: wd-vit-large-tagger-v3.onnx (~1.2 GB)
+#                        Input: 448x448, NHWC layout
+#
+# wd-eva02-large-tagger-v3  WD EVA02 Large Tagger V3
+#                        File: wd-eva02-large-tagger-v3.onnx (~1.2 GB)
+#                        Input: 448x448, NHWC layout
+#
+# p1atdev-wd-swinv2-tagger-v3-hf  Quantized WD SwinV2 (faster)
+#                        File: p1atdev-wd-swinv2-tagger-v3-hf.onnx (~105 MB)
+#                        Input: 448x448, NHWC layout
+#
+# All WD taggers use: wd-tags.csv for labels
+
+# =============================================================================
+# OPTIONAL: Path Customization
+# =============================================================================
+#
+# Uncomment to override default paths:
+#
+# models_dir = ".vendor/models"
+# ort_library = ".vendor/onnxruntime/lib/onnxruntime.dll"
+
+# =============================================================================
+# ADVANCED: Custom Model Override
+# =============================================================================
+#
+# You can override built-in model settings or add new models.
+# This is only needed for advanced use cases.
+#
+# [models.my-custom-model]
+# name = "My Custom Model"
+# type = "moderation"  # or "tagging"
+# path = "my-model.onnx"
+#
+# [models.my-custom-model.input]
 # width = 224
 # height = 224
 # normalize = true
 # layout = "NCHW"
-
-# ============================================================================
-# MODEL PRESETS (for automatic download)
-# These are pre-configured models that can be downloaded with `task deps-models`
-# ============================================================================
-
-[[presets]]
-id = "gantman-nsfw"
-name = "GantMan NSFW (5-class)"
-url = "https://github.com/iola1999/nsfw-detect-onnx/releases/download/v1.0.0/model.onnx"
-size_bytes = 87000000
-
-[presets.config]
-name = "GantMan NSFW"
-type = "moderation"
-path = "nsfw-inception-v3.onnx"
-
-[[presets]]
-id = "mobilenetv2"
-name = "MobileNetV2 (ImageNet)"
-url = "https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx"
-size_bytes = 14000000
-
-[presets.config]
-name = "MobileNetV2"
-type = "tagging"
-path = "mobilenetv2-12.onnx"
+#
+# [models.my-custom-model.output]
+# num_classes = 2
+# labels = ["safe", "unsafe"]

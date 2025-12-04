@@ -221,13 +221,7 @@ tasks:
             "https://huggingface.co/AdamCodd/vit-base-nsfw-detector/resolve/main/onnx/model.onnx"
         fi
 
-        if [ -f ".vendor/models/falconsai-nsfw.onnx" ]; then
-          echo "[moderation] Falconsai NSFW already downloaded."
-        else
-          echo "[moderation] Downloading Falconsai NSFW (224x224, normal/nsfw, 98% accuracy)..."
-          curl --ssl-no-revoke -L -o ".vendor/models/falconsai-nsfw.onnx" \
-            "https://huggingface.co/Falconsai/nsfw_image_detection/resolve/main/onnx/model.onnx"
-        fi
+        # NOTE: Falconsai NSFW removed - no ONNX version available (only PyTorch/Safetensors)
 
         if [ -f ".vendor/models/spiele-nsfw.onnx" ]; then
           echo "[moderation] spiele NSFW detector already downloaded."
@@ -240,9 +234,9 @@ tasks:
         if [ -f ".vendor/models/taufiqdp-mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx" ]; then
           echo "[moderation] TaufiqDP MobileNetV4 NSFW already downloaded."
         else
-          echo "[moderation] Downloading TaufiqDP MobileNetV4 NSFW..."
+          echo "[moderation] Downloading TaufiqDP MobileNetV4 NSFW (~10MB)..."
           curl --ssl-no-revoke -L -o ".vendor/models/taufiqdp-mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx" \
-            "https://huggingface.co/taufiqdp/mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier/resolve/main/onnx/model.onnx"
+            "https://huggingface.co/taufiqdp/mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier/resolve/main/mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx"
         fi
 
         echo ""
@@ -263,13 +257,12 @@ tasks:
         echo "  - onnx-community-nsfw.onnx"
         echo "  - nsfwjs.onnx"
         echo "  - adamcodd-vit-base-nsfw.onnx (AdamCodd)"
-        echo "  - falconsai-nsfw.onnx (Falconsai)"
         echo "  - spiele-nsfw.onnx"
         echo "  - taufiqdp-mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx"
         echo ""
         echo "To use these models, update camden-classifier.toml:"
-        echo "  active_tagging = \"convnextv2-large\"  # or \"wd-vit-tagger-v3\""
-        echo "  active_moderation = \"adamcodd-vit-nsfw\"  # or \"falconsai-nsfw\""
+        echo "  tagging_model = \"wd-vit-tagger-v3\"  # or \"vit-base-224\""
+        echo "  moderation_model = \"adamcodd-vit-nsfw\"  # or \"gantman-nsfw\""
 
   convert-hf-model:
     desc: Convert a HuggingFace model to ONNX (requires Python + torch)

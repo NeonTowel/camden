@@ -31,6 +31,9 @@ pub struct TaggingConfig {
     pub normalization_mean: [f32; 3],
     /// Normalization std to apply when `normalize` is true.
     pub normalization_std: [f32; 3],
+    /// Whether this is a multi-label classifier (sigmoid outputs).
+    /// When true, softmax is skipped and raw sigmoid probabilities are used.
+    pub multi_label: bool,
 }
 
 impl Default for TaggingConfig {
@@ -42,6 +45,7 @@ impl Default for TaggingConfig {
             layout: "NCHW".to_string(),
             normalization_mean: IMAGE_NET_MEAN,
             normalization_std: IMAGE_NET_STD,
+            multi_label: false,
         }
     }
 }
@@ -56,6 +60,20 @@ impl TaggingConfig {
             layout: input.layout.clone(),
             normalization_mean: input.mean.unwrap_or(IMAGE_NET_MEAN),
             normalization_std: input.std.unwrap_or(IMAGE_NET_STD),
+            multi_label: false,
+        }
+    }
+
+    /// Create config from model input spec with multi-label flag.
+    pub fn from_specs_with_output(input: &ModelInputSpec, multi_label: bool) -> Self {
+        Self {
+            input_width: input.width,
+            input_height: input.height,
+            normalize: input.normalize,
+            layout: input.layout.clone(),
+            normalization_mean: input.mean.unwrap_or(IMAGE_NET_MEAN),
+            normalization_std: input.std.unwrap_or(IMAGE_NET_STD),
+            multi_label,
         }
     }
 }
@@ -103,14 +121,13 @@ impl TaggingClassifier {
         max_tags: usize,
     ) -> Result<Vec<ImageTag>, ClassifierError> {
         let input_size = (self.config.input_width as i32, self.config.input_height as i32);
-        
+
         // Preprocess with model-specific settings including layout
         let input = preprocess_image_with_layout(
-            image_path, 
-            input_size, 
+            image_path,
+            input_size,
             self.config.normalize,
-            &self.config.layout
-            ,
+            &self.config.layout,
             self.config.normalization_mean,
             self.config.normalization_std,
         )?;
@@ -155,15 +172,21 @@ impl TaggingClassifier {
             logits_slice.to_vec()
         };
         
-        // Check if logits already sum to ~1.0 (indicating they're probabilities, not logits)
-        let logits_sum: f32 = logits.iter().sum();
-        let is_already_probabilities = (logits_sum - 1.0).abs() < 0.01; // Allow small tolerance
-        
-        // Apply softmax only if not already probabilities
-        let probabilities = if is_already_probabilities {
+        // For multi-label models (e.g., WD taggers), outputs are already sigmoid probabilities
+        // for each tag independently. Do NOT apply softmax as it would incorrectly normalize
+        // across all 10k+ tags, making all probabilities tiny.
+        let probabilities = if self.config.multi_label {
+            // Multi-label: use raw sigmoid outputs directly
             logits.clone()
         } else {
-            softmax(&logits)
+            // Single-label: check if already probabilities or apply softmax
+            let logits_sum: f32 = logits.iter().sum();
+            let is_already_probabilities = (logits_sum - 1.0).abs() < 0.01;
+            if is_already_probabilities {
+                logits.clone()
+            } else {
+                softmax(&logits)
+            }
         };
 
         // Get top-k predictions

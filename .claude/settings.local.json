@@ -3,7 +3,16 @@
     "allow": [
       "Bash(cat:*)",
       "Bash(task check:*)",
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "Bash(task run:*)",
+      "Bash(task test:*)",
+      "Bash(dir:*)",
+      "WebSearch",
+      "Bash(ls:*)",
+      "Bash(task build:*)",
+      "Bash(./target/debug/camden.exe:*)",
+      "Bash(cargo build:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

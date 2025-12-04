@@ -161,7 +161,10 @@ impl ImageClassifier {
         
         // Get model-specific configuration for tagging
         let tagging = if let Some(model_config) = config.active_tagging_model() {
-            let tag_config = TaggingConfig::from_specs(&model_config.input);
+            let tag_config = TaggingConfig::from_specs_with_output(
+                &model_config.input,
+                model_config.output.multi_label,
+            );
             let labels = load_tagging_labels(&models_dir, &model_config.output)?;
             TaggingClassifier::with_config_and_labels(&tagging_path, tag_config, labels)?
         } else {
