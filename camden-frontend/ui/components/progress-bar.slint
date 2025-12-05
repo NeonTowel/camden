@@ -1,0 +1,148 @@
+// ProgressBar component - scan progress indicator
+
+import { Theme } from "theme.slint";
+
+export component ProgressBar inherits Rectangle {
+    in property <bool> indeterminate: false;
+    in property <float> progress: 0.0;  // 0.0 to 1.0
+    in property <float> animation-phase: 0.0;  // For indeterminate animation
+
+    height: 8px;
+    border-radius: 4px;
+    background: Theme.colors.border_default;
+    clip: true;
+
+    // Determinate progress
+    if !indeterminate : Rectangle {
+        width: parent.width * clamp(progress, 0.0, 1.0);
+        height: parent.height;
+        background: Theme.colors.accent_primary;
+        border-radius: 4px;
+
+        animate width {
+            duration: 200ms;
+            easing: ease-out;
+        }
+    }
+
+    // Indeterminate animated bar
+    if indeterminate : Rectangle {
+        width: parent.width * 0.3;
+        height: parent.height;
+        x: (parent.width + self.width) * animation-phase - self.width;
+        background: Theme.colors.accent_primary;
+        border-radius: 4px;
+    }
+}
+
+export component ScanProgress inherits Rectangle {
+    in property <bool> scanning: false;
+    in property <float> animation-phase: 0.0;
+    in property <string> current-file: "";
+    in property <int> files-found: 0;
+    in property <int> duplicates-found: 0;
+    in property <int> low-res-found: 0;
+
+    visible: scanning;
+    height: scanning ? 60px : 0px;
+
+    VerticalLayout {
+        spacing: 8px;
+
+        ProgressBar {
+            indeterminate: true;
+            animation-phase: animation-phase;
+        }
+
+        HorizontalLayout {
+            spacing: 16px;
+
+            Text {
+                text: "Scanning: " + current-file;
+                font-size: 9pt;
+                color: Theme.colors.text_secondary;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 16px;
+
+            // Stats badges
+            Rectangle {
+                height: 20px;
+                padding-left: 8px;
+                padding-right: 8px;
+                border-radius: 4px;
+                background: Theme.colors.accent_primary;
+
+                HorizontalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: "\u{1F4C1}";
+                        font-size: 10pt;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: files-found + " files";
+                        font-size: 9pt;
+                        color: white;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 20px;
+                padding-left: 8px;
+                padding-right: 8px;
+                border-radius: 4px;
+                background: Theme.colors.accent_warning;
+
+                HorizontalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: "\u{1F504}";
+                        font-size: 10pt;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: duplicates-found + " duplicates";
+                        font-size: 9pt;
+                        color: white;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 20px;
+                padding-left: 8px;
+                padding-right: 8px;
+                border-radius: 4px;
+                background: Theme.colors.accent_danger;
+
+                HorizontalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: "\u{1F4F1}";
+                        font-size: 10pt;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: low-res-found + " low-res";
+                        font-size: 9pt;
+                        color: white;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+        }
+    }
+}

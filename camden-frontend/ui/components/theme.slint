@@ -1,0 +1,124 @@
+// Theme component - centralized color definitions for light/dark mode
+
+// Theme colors structure
+export struct ThemeColors {
+    // Backgrounds
+    bg_primary: color,
+    bg_secondary: color,
+    bg_card: color,
+    bg_hover: color,
+    bg_input: color,
+
+    // Text
+    text_primary: color,
+    text_secondary: color,
+    text_muted: color,
+
+    // Borders
+    border_default: color,
+    border_focus: color,
+
+    // Accents
+    accent_primary: color,
+    accent_success: color,
+    accent_warning: color,
+    accent_danger: color,
+
+    // Status bar
+    statusbar_bg: color,
+    statusbar_text: color,
+
+    // Tab bar
+    tab_bg: color,
+    tab_active_bg: color,
+    tab_indicator: color,
+}
+
+// Dark theme palette
+export global DarkTheme {
+    out property <ThemeColors> colors: {
+        // Backgrounds
+        bg_primary: #1a1a2e,
+        bg_secondary: #16213e,
+        bg_card: #1f2937,
+        bg_hover: #374151,
+        bg_input: #111827,
+
+        // Text
+        text_primary: #f3f4f6,
+        text_secondary: #9ca3af,
+        text_muted: #6b7280,
+
+        // Borders
+        border_default: #374151,
+        border_focus: #3b82f6,
+
+        // Accents
+        accent_primary: #3b82f6,
+        accent_success: #10b981,
+        accent_warning: #f59e0b,
+        accent_danger: #ef4444,
+
+        // Status bar
+        statusbar_bg: #111827,
+        statusbar_text: #9ca3af,
+
+        // Tab bar
+        tab_bg: #1f2937,
+        tab_active_bg: #1a1a2e,
+        tab_indicator: #3b82f6,
+    };
+}
+
+// Light theme palette
+export global LightTheme {
+    out property <ThemeColors> colors: {
+        // Backgrounds
+        bg_primary: #f8f9fa,
+        bg_secondary: #e9ecef,
+        bg_card: #ffffff,
+        bg_hover: #f1f3f5,
+        bg_input: #ffffff,
+
+        // Text
+        text_primary: #212529,
+        text_secondary: #6c757d,
+        text_muted: #adb5bd,
+
+        // Borders
+        border_default: #dee2e6,
+        border_focus: #3b82f6,
+
+        // Accents
+        accent_primary: #3b82f6,
+        accent_success: #10b981,
+        accent_warning: #f59e0b,
+        accent_danger: #ef4444,
+
+        // Status bar
+        statusbar_bg: #212529,
+        statusbar_text: #e9ecef,
+
+        // Tab bar
+        tab_bg: #e9ecef,
+        tab_active_bg: #ffffff,
+        tab_indicator: #3b82f6,
+    };
+}
+
+// Active theme - switches based on dark_mode property
+export global Theme {
+    in-out property <bool> dark_mode: true;
+
+    out property <ThemeColors> colors: dark_mode ? DarkTheme.colors : LightTheme.colors;
+
+    // Badge colors (consistent across themes)
+    out property <color> badge_high_res: #10b981;
+    out property <color> badge_mobile_res: #f59e0b;
+    out property <color> badge_low_res: #ef4444;
+    out property <color> badge_sensitive: #f59e0b;
+    out property <color> badge_mature: #ef4444;
+    out property <color> badge_restricted: #8b5cf6;
+    out property <color> badge_keep: #10b981;
+    out property <color> selection_color: #10b981;
+}

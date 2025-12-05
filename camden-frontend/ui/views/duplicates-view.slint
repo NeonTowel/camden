@@ -1,0 +1,400 @@
+// DuplicatesView - group grid for managing duplicate photos
+
+import { Button, ScrollView, CheckBox } from "std-widgets.slint";
+import { PhotoData, PhotoCard } from "../components/photo-card.slint";
+import { ResolutionBadge, ModerationBadge } from "../components/badge.slint";
+import { Theme } from "../components/theme.slint";
+
+// Duplicate group data
+export struct DuplicateGroup {
+    fingerprint: string,
+    files: [PhotoData],
+    total_size_bytes: int,
+    reclaimable_bytes: int,
+}
+
+// Stats for the sidebar
+export struct DuplicateStats {
+    total_groups: int,
+    total_files: int,
+    total_duplicates: int,
+    reclaimable_mb: float,
+    selected_count: int,
+}
+
+component DuplicateGroupCard inherits Rectangle {
+    in property <DuplicateGroup> group;
+    in property <int> group-index;
+
+    callback file-toggled(int, int);
+    callback select-best(int);
+    callback archive-others(int);
+
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Theme.colors.border_default;
+    background: Theme.colors.bg_card;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        // Group header
+        HorizontalLayout {
+            spacing: 12px;
+
+            Text {
+                text: group.files.length == 1 ? "Low Resolution" : "Duplicate Group";
+                font-size: 11pt;
+                font-weight: 600;
+                color: group.files.length == 1 ? Theme.colors.accent_danger : Theme.colors.text_primary;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                height: 20px;
+                padding-left: 8px;
+                padding-right: 8px;
+                border-radius: 4px;
+                background: Theme.colors.bg_secondary;
+
+                Text {
+                    text: group.files.length + " files";
+                    font-size: 9pt;
+                    color: Theme.colors.text_secondary;
+                    vertical-alignment: center;
+                }
+            }
+
+            if group.reclaimable_bytes > 0 : Rectangle {
+                height: 20px;
+                padding-left: 8px;
+                padding-right: 8px;
+                border-radius: 4px;
+                background: Theme.colors.accent_warning.with_alpha(0.15);
+
+                Text {
+                    text: format-size(group.reclaimable_bytes) + " reclaimable";
+                    font-size: 9pt;
+                    color: Theme.colors.accent_warning;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            // Quick actions
+            if group.files.length > 1 : Button {
+                text: "Select Best";
+                clicked => { select-best(group-index); }
+            }
+
+            if group.files.length > 1 : Button {
+                text: "Archive Others";
+                clicked => { archive-others(group-index); }
+            }
+        }
+
+        // Files grid
+        HorizontalLayout {
+            spacing: 12px;
+
+            for file[file-index] in group.files : PhotoCard {
+                photo: file;
+                show-selection: true;
+                compact: false;
+                toggle-selected => { file-toggled(group-index, file-index); }
+            }
+        }
+
+        // File details row
+        HorizontalLayout {
+            spacing: 8px;
+
+            for file[file-index] in group.files : Rectangle {
+                width: 160px;
+
+                VerticalLayout {
+                    spacing: 2px;
+
+                    Text {
+                        text: file.display_name;
+                        font-size: 8pt;
+                        color: Theme.colors.text_muted;
+                        overflow: elide;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // Helper function for size formatting (placeholder - actual impl in Rust)
+    pure function format-size(bytes: int) -> string {
+        if bytes >= 1048576 {
+            return round(bytes / 1048576) + " MB";
+        } else if bytes >= 1024 {
+            return round(bytes / 1024) + " KB";
+        } else {
+            return bytes + " B";
+        }
+    }
+}
+
+export component DuplicatesView inherits Rectangle {
+    in property <[DuplicateGroup]> groups: [];
+    in property <DuplicateStats> stats: {
+        total_groups: 0,
+        total_files: 0,
+        total_duplicates: 0,
+        reclaimable_mb: 0.0,
+        selected_count: 0,
+    };
+
+    // Sort/filter options
+    in-out property <int> sort-by: 0;  // 0=Largest first, 1=Most files, 2=Newest
+    in-out property <bool> show-pairs: true;
+    in-out property <bool> show-multi: true;
+
+    callback file-toggled(int, int);
+    callback select-all-best();
+    callback archive-selected();
+    callback select-best-in-group(int);
+    callback archive-others-in-group(int);
+
+    background: Theme.colors.bg_secondary;
+
+    HorizontalLayout {
+        // Sidebar
+        Rectangle {
+            width: 200px;
+            background: Theme.colors.bg_card;
+            border-width: 0px;
+            border-color: Theme.colors.border_default;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 16px;
+
+                // Stats section
+                Text {
+                    text: "SUMMARY";
+                    font-size: 10pt;
+                    font-weight: 700;
+                    color: Theme.colors.text_secondary;
+                    letter-spacing: 1px;
+                }
+
+                VerticalLayout {
+                    spacing: 8px;
+
+                    // Groups stat
+                    HorizontalLayout {
+                        Text {
+                            text: "Groups";
+                            font-size: 10pt;
+                            color: Theme.colors.text_secondary;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: stats.total_groups;
+                            font-size: 10pt;
+                            font-weight: 600;
+                            color: Theme.colors.text_primary;
+                        }
+                    }
+
+                    // Duplicates stat
+                    HorizontalLayout {
+                        Text {
+                            text: "Duplicates";
+                            font-size: 10pt;
+                            color: Theme.colors.text_secondary;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: stats.total_duplicates;
+                            font-size: 10pt;
+                            font-weight: 600;
+                            color: Theme.colors.accent_warning;
+                        }
+                    }
+
+                    // Reclaimable stat
+                    HorizontalLayout {
+                        Text {
+                            text: "Reclaimable";
+                            font-size: 10pt;
+                            color: Theme.colors.text_secondary;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: round(stats.reclaimable_mb * 10) / 10 + " MB";
+                            font-size: 10pt;
+                            font-weight: 600;
+                            color: Theme.colors.accent_success;
+                        }
+                    }
+
+                    // Selected stat
+                    HorizontalLayout {
+                        Text {
+                            text: "Selected";
+                            font-size: 10pt;
+                            color: Theme.colors.text_secondary;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: stats.selected_count;
+                            font-size: 10pt;
+                            font-weight: 600;
+                            color: Theme.colors.accent_primary;
+                        }
+                    }
+                }
+
+                Rectangle { height: 8px; }
+
+                // Filter section
+                Text {
+                    text: "SHOW";
+                    font-size: 10pt;
+                    font-weight: 700;
+                    color: Theme.colors.text_secondary;
+                    letter-spacing: 1px;
+                }
+
+                VerticalLayout {
+                    spacing: 4px;
+
+                    CheckBox {
+                        text: "Pairs (2 files)";
+                        checked <=> show-pairs;
+                    }
+
+                    CheckBox {
+                        text: "Multi (3+ files)";
+                        checked <=> show-multi;
+                    }
+                }
+
+                Rectangle { height: 8px; }
+
+                // Actions section
+                Text {
+                    text: "ACTIONS";
+                    font-size: 10pt;
+                    font-weight: 700;
+                    color: Theme.colors.text_secondary;
+                    letter-spacing: 1px;
+                }
+
+                VerticalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        text: "Select All Best";
+                        clicked => { select-all-best(); }
+                    }
+
+                    Button {
+                        text: "Archive Selected (" + stats.selected_count + ")";
+                        enabled: stats.selected_count > 0;
+                        clicked => { archive-selected(); }
+                    }
+                }
+
+                // Spacer
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+
+        // Main content area
+        Rectangle {
+            horizontal-stretch: 1;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                // Header
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    Text {
+                        text: "Duplicate Groups";
+                        font-size: 16pt;
+                        font-weight: 600;
+                        color: Theme.colors.text_primary;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        height: 24px;
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        border-radius: 4px;
+                        background: Theme.colors.accent_primary.with_alpha(0.15);
+
+                        Text {
+                            text: groups.length + " groups, " + stats.total_files + " files";
+                            font-size: 10pt;
+                            color: Theme.colors.accent_primary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                // Empty state
+                if groups.length == 0 : Rectangle {
+                    vertical-stretch: 1;
+                    background: Theme.colors.bg_card;
+                    border-radius: 8px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 12px;
+
+                        Text {
+                            text: "\u{1F4C1}";
+                            font-size: 48pt;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: "No duplicates found";
+                            font-size: 14pt;
+                            font-weight: 600;
+                            color: Theme.colors.text_secondary;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: "Run a scan to find duplicate photos";
+                            font-size: 11pt;
+                            color: Theme.colors.text_muted;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                // Groups list
+                if groups.length > 0 : ScrollView {
+                    VerticalLayout {
+                        spacing: 12px;
+
+                        for group[group-index] in groups : DuplicateGroupCard {
+                            group: group;
+                            group-index: group-index;
+                            file-toggled(gi, fi) => { file-toggled(gi, fi); }
+                            select-best(gi) => { select-best-in-group(gi); }
+                            archive-others(gi) => { archive-others-in-group(gi); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

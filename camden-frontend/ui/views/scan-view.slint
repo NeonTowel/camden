@@ -1,0 +1,296 @@
+// ScanView - folder selection, options, and scan progress
+
+import { Button, LineEdit, CheckBox } from "std-widgets.slint";
+import { ScanProgress } from "../components/progress-bar.slint";
+import { Theme } from "../components/theme.slint";
+
+export component ScanView inherits Rectangle {
+    // Input paths
+    in-out property <string> root-path: "";
+    in-out property <string> archive-path: "";
+
+    // Scan options
+    in-out property <bool> find-duplicates: true;
+    in-out property <bool> classify-images: true;
+    in-out property <bool> detect-low-res: true;
+    in-out property <bool> rename-to-guid: false;
+
+    // Scan state
+    in property <bool> scanning: false;
+    in property <float> progress-phase: 0.0;
+    in property <string> current-file: "";
+    in property <int> files-found: 0;
+    in property <int> duplicates-found: 0;
+    in property <int> low-res-found: 0;
+
+    // Last scan summary
+    in property <string> last-scan-summary: "";
+    in property <float> last-scan-duration: 0.0;
+
+    // Callbacks
+    callback browse-root();
+    callback browse-archive();
+    callback start-scan();
+
+    background: Theme.colors.bg_card;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 20px;
+
+        // Header
+        Text {
+            text: "Scan Photos";
+            font-size: 20pt;
+            font-weight: 700;
+            color: Theme.colors.text_primary;
+        }
+
+        Text {
+            text: "Select a folder to scan for duplicates, classify images, and detect low-resolution photos.";
+            font-size: 11pt;
+            color: Theme.colors.text_secondary;
+            wrap: word-wrap;
+        }
+
+        Rectangle { height: 8px; }
+
+        // Folder Selection Section
+        Rectangle {
+            border-radius: 8px;
+            background: Theme.colors.bg_secondary;
+            border-width: 1px;
+            border-color: Theme.colors.border_default;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 16px;
+
+                // Root folder
+                VerticalLayout {
+                    spacing: 6px;
+
+                    Text {
+                        text: "Source Folder";
+                        font-size: 10pt;
+                        font-weight: 600;
+                        color: Theme.colors.text_primary;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        LineEdit {
+                            placeholder-text: "Select folder to scan...";
+                            text <=> root-path;
+                            horizontal-stretch: 1;
+                            enabled: !scanning;
+                        }
+
+                        Button {
+                            text: "Browse...";
+                            clicked => { browse-root(); }
+                            enabled: !scanning;
+                        }
+                    }
+                }
+
+                // Archive folder
+                VerticalLayout {
+                    spacing: 6px;
+
+                    Text {
+                        text: "Archive Destination";
+                        font-size: 10pt;
+                        font-weight: 600;
+                        color: Theme.colors.text_primary;
+                    }
+
+                    Text {
+                        text: "Duplicates and selected files will be moved here (recoverable)";
+                        font-size: 9pt;
+                        color: Theme.colors.text_muted;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        LineEdit {
+                            placeholder-text: "Select archive folder...";
+                            text <=> archive-path;
+                            horizontal-stretch: 1;
+                            enabled: !scanning;
+                        }
+
+                        Button {
+                            text: "Browse...";
+                            clicked => { browse-archive(); }
+                            enabled: !scanning;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Scan Options Section
+        Rectangle {
+            border-radius: 8px;
+            background: Theme.colors.bg_secondary;
+            border-width: 1px;
+            border-color: Theme.colors.border_default;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                Text {
+                    text: "Scan Options";
+                    font-size: 10pt;
+                    font-weight: 600;
+                    color: Theme.colors.text_primary;
+                }
+
+                HorizontalLayout {
+                    spacing: 24px;
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        CheckBox {
+                            text: "Find duplicates";
+                            checked <=> find-duplicates;
+                            enabled: !scanning;
+                        }
+
+                        CheckBox {
+                            text: "Classify images (AI)";
+                            checked <=> classify-images;
+                            enabled: !scanning;
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        CheckBox {
+                            text: "Detect low resolution";
+                            checked <=> detect-low-res;
+                            enabled: !scanning;
+                        }
+
+                        CheckBox {
+                            text: "Rename files to GUID";
+                            checked <=> rename-to-guid;
+                            enabled: !scanning;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Quick Presets
+        HorizontalLayout {
+            spacing: 12px;
+
+            Text {
+                text: "Quick presets:";
+                font-size: 10pt;
+                color: Theme.colors.text_secondary;
+                vertical-alignment: center;
+            }
+
+            Button {
+                text: "Full Analysis";
+                enabled: !scanning;
+                clicked => {
+                    find-duplicates = true;
+                    classify-images = true;
+                    detect-low-res = true;
+                }
+            }
+
+            Button {
+                text: "Duplicates Only";
+                enabled: !scanning;
+                clicked => {
+                    find-duplicates = true;
+                    classify-images = false;
+                    detect-low-res = false;
+                }
+            }
+
+            Button {
+                text: "Quick Scan";
+                enabled: !scanning;
+                clicked => {
+                    find-duplicates = true;
+                    classify-images = false;
+                    detect-low-res = true;
+                }
+            }
+        }
+
+        // Scan Progress
+        ScanProgress {
+            scanning: scanning;
+            animation-phase: progress-phase;
+            current-file: current-file;
+            files-found: files-found;
+            duplicates-found: duplicates-found;
+            low-res-found: low-res-found;
+        }
+
+        // Start Scan Button
+        HorizontalLayout {
+            spacing: 12px;
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Button {
+                text: scanning ? "Scanning..." : "Start Scan";
+                enabled: !scanning && root-path != "";
+                clicked => { start-scan(); }
+                min-width: 120px;
+            }
+        }
+
+        // Last Scan Summary
+        if last-scan-summary != "" && !scanning : Rectangle {
+            border-radius: 8px;
+            background: Theme.colors.accent_success.with_alpha(0.15);
+            border-width: 1px;
+            border-color: Theme.colors.accent_success.with_alpha(0.5);
+
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                Text {
+                    text: "\u{2713}";
+                    font-size: 14pt;
+                    color: Theme.colors.accent_success;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: last-scan-summary;
+                    font-size: 10pt;
+                    color: Theme.colors.accent_success;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+
+                if last-scan-duration > 0.0 : Text {
+                    text: "(" + round(last-scan-duration * 100) / 100 + "s)";
+                    font-size: 9pt;
+                    color: Theme.colors.accent_success;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Spacer
+        Rectangle { vertical-stretch: 1; }
+    }
+}

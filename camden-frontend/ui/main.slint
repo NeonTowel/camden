@@ -1,15 +1,32 @@
+// Camden Photo Manager - Main Window
+// Redesigned UI with tabbed navigation and dark/light theme
+
 import { Button, LineEdit, ScrollView, ListView, CheckBox } from "std-widgets.slint";
 
+// Import theme
+import { Theme } from "components/theme.slint";
+
+// Import components
+import { TabBar } from "components/tab-bar.slint";
+import { PhotoData } from "components/photo-card.slint";
+
+// Import views
+import { ScanView } from "views/scan-view.slint";
+import { DuplicatesView, DuplicateGroup, DuplicateStats } from "views/duplicates-view.slint";
+import { GalleryView, GalleryStats } from "views/gallery-view.slint";
+import { SettingsView } from "views/settings-view.slint";
+
+// Re-export types for Rust backend
+export { PhotoData, DuplicateGroup, DuplicateStats, GalleryStats }
+
+// Legacy compatibility - keep FileData and GroupData for existing Rust code
 export struct FileData {
     display_name: string,
     info: string,
     selected: bool,
     thumbnail: image,
-    // Resolution tier: 0=High, 1=Mobile, 2=Low
     resolution_tier: int,
-    // AI moderation tier: "" (none), "Safe", "Sensitive", "Mature", "Restricted"
     moderation_tier: string,
-    // AI-generated tags (up to 5)
     tags: string,
 }
 
@@ -20,52 +37,243 @@ export struct GroupData {
 }
 
 export component MainWindow inherits Window {
-    width: 1024px;
-    height: 760px;
-    title: "Camden Preview (Slint)";
+    width: 1200px;
+    height: 800px;
+    title: "Camden Photo Manager";
+    background: Theme.colors.bg_primary;
 
+    // Navigation state
+    in-out property <int> active-tab: 0;
+
+    // Theme - dark mode by default
+    in-out property <bool> dark_mode: true;
+
+    // ===== SCAN VIEW PROPERTIES =====
     in-out property <string> root_path: "";
     in-out property <string> target_path: "";
-    in-out property <string> status_text: "";
-    in-out property <[GroupData]> groups: [];
     in-out property <bool> scanning: false;
     in-out property <float> progress_phase: 0.0;
     in-out property <bool> rename_to_guid: false;
-    in-out property <bool> detect_low_resolution: false;
-    in-out property <bool> enable_classification: false;
+    in-out property <bool> detect_low_resolution: true;
+    in-out property <bool> enable_classification: true;
+    in-out property <string> current_scan_file: "";
+    in-out property <int> files_found: 0;
+    in-out property <int> duplicates_found: 0;
+    in-out property <int> low_res_found: 0;
+    in-out property <string> last_scan_summary: "";
+    in-out property <float> last_scan_duration: 0.0;
 
+    // ===== DUPLICATES VIEW PROPERTIES =====
+    in-out property <[DuplicateGroup]> duplicate_groups: [];
+    in-out property <DuplicateStats> duplicate_stats: {
+        total_groups: 0,
+        total_files: 0,
+        total_duplicates: 0,
+        reclaimable_mb: 0.0,
+        selected_count: 0,
+    };
+
+    // ===== GALLERY VIEW PROPERTIES =====
+    in-out property <[PhotoData]> gallery_photos: [];
+    in-out property <GalleryStats> gallery_stats: {
+        total_photos: 0,
+        filtered_photos: 0,
+        selected_count: 0,
+        landscape_count: 0,
+        portrait_count: 0,
+        square_count: 0,
+    };
+    // Gallery filters - individual properties
+    in-out property <bool> filter_show_landscape: true;
+    in-out property <bool> filter_show_portrait: true;
+    in-out property <bool> filter_show_square: true;
+    in-out property <bool> filter_show_high_res: true;
+    in-out property <bool> filter_show_mobile_res: true;
+    in-out property <bool> filter_show_low_res: true;
+    in-out property <bool> filter_show_safe: true;
+    in-out property <bool> filter_show_sensitive: true;
+    in-out property <bool> filter_show_mature: true;
+    in-out property <bool> filter_show_restricted: true;
+    in-out property <string> filter_tag_search: "";
+    in-out property <[{name: string, count: int}]> available_tags: [];
+
+    // ===== SETTINGS VIEW PROPERTIES =====
+    in-out property <string> settings_archive_path: "";
+    in-out property <string> settings_cache_path: "";
+    in-out property <bool> settings_show_tags: true;
+    in-out property <bool> settings_compact_cards: false;
+    in-out property <float> settings_cache_size_mb: 0.0;
+    in-out property <int> settings_cached_thumbnails: 0;
+
+    // ===== LEGACY PROPERTIES (for backward compatibility) =====
+    in-out property <[GroupData]> groups: [];
+    in-out property <string> status_text: "";
+
+    // ===== CALLBACKS =====
+    // Navigation
+    callback tab-changed(int);
+
+    // Scan view callbacks
     callback browse_root();
     callback browse_target();
     callback scan_requested();
+
+    // Duplicates view callbacks
     callback file_toggled(int, int);
     callback move_requested();
+    callback select_all_best();
+    callback archive_selected();
+    callback select_best_in_group(int);
+    callback archive_others_in_group(int);
 
+    // Gallery view callbacks
+    callback gallery_photo_clicked(int);
+    callback gallery_photo_toggle_selected(int);
+    callback gallery_filter_changed();
+    callback gallery_export_selected();
+    callback gallery_archive_selected();
+    callback gallery_select_all();
+    callback gallery_deselect_all();
+
+    // Settings view callbacks
+    callback browse_archive_path();
+    callback browse_cache_path();
+    callback clear_cache();
+    callback save_settings();
+    callback reset_defaults();
+
+    // Sync theme with global
+    changed dark_mode => {
+        Theme.dark_mode = dark_mode;
+    }
+
+    // Initialize theme
+    init => {
+        Theme.dark_mode = dark_mode;
+    }
+
+    // Main layout
     VerticalLayout {
-        padding: 16px;
-        spacing: 12px;
+        // Tab bar
+        TabBar {
+            active-tab <=> active-tab;
+            tab-changed(tab) => { tab-changed(tab); }
+        }
 
-        HorizontalLayout {
-            spacing: 8px;
+        // Content area
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            background: Theme.colors.bg_primary;
 
-            LineEdit {
-                placeholder-text: "Select root directory…";
-                text <=> root_path;
-                horizontal-stretch: 1.0;
-                enabled: !scanning;
+            // Scan View (tab 0)
+            if active-tab == 0 : ScanView {
+                root-path <=> root_path;
+                archive-path <=> target_path;
+                find-duplicates: true;
+                classify-images <=> enable_classification;
+                detect-low-res <=> detect_low_resolution;
+                rename-to-guid <=> rename_to_guid;
+                scanning: scanning;
+                progress-phase: progress_phase;
+                current-file: current_scan_file;
+                files-found: files_found;
+                duplicates-found: duplicates_found;
+                low-res-found: low_res_found;
+                last-scan-summary: last_scan_summary;
+                last-scan-duration: last_scan_duration;
+
+                browse-root => { browse_root(); }
+                browse-archive => { browse_target(); }
+                start-scan => { scan_requested(); }
             }
 
-            Button {
-                text: "Browse";
-                clicked => { browse_root(); }
-                enabled: !scanning;
+            // Duplicates View (tab 1)
+            if active-tab == 1 : DuplicatesView {
+                groups: duplicate_groups;
+                stats: duplicate_stats;
+
+                file-toggled(gi, fi) => { file_toggled(gi, fi); }
+                select-all-best => { select_all_best(); }
+                archive-selected => { archive_selected(); }
+                select-best-in-group(gi) => { select_best_in_group(gi); }
+                archive-others-in-group(gi) => { archive_others_in_group(gi); }
             }
 
-            Button {
-                text: "Scan";
-                clicked => { scan_requested(); }
-                enabled: !scanning;
+            // Gallery View (tab 2)
+            if active-tab == 2 : GalleryView {
+                photos: gallery_photos;
+                stats: gallery_stats;
+                show-landscape <=> filter_show_landscape;
+                show-portrait <=> filter_show_portrait;
+                show-square <=> filter_show_square;
+                show-high-res <=> filter_show_high_res;
+                show-mobile-res <=> filter_show_mobile_res;
+                show-low-res <=> filter_show_low_res;
+                show-safe <=> filter_show_safe;
+                show-sensitive <=> filter_show_sensitive;
+                show-mature <=> filter_show_mature;
+                show-restricted <=> filter_show_restricted;
+                tag-search <=> filter_tag_search;
+                available-tags: available_tags;
+
+                photo-clicked(idx) => { gallery_photo_clicked(idx); }
+                photo-toggle-selected(idx) => { gallery_photo_toggle_selected(idx); }
+                filter-changed => { gallery_filter_changed(); }
+                export-selected => { gallery_export_selected(); }
+                archive-selected => { gallery_archive_selected(); }
+                select-all => { gallery_select_all(); }
+                deselect-all => { gallery_deselect_all(); }
             }
 
+            // Settings View (tab 3)
+            if active-tab == 3 : SettingsView {
+                archive-path <=> settings_archive_path;
+                cache-path <=> settings_cache_path;
+                show-tags <=> settings_show_tags;
+                compact-cards <=> settings_compact_cards;
+                cache-size-mb: settings_cache_size_mb;
+                cached-thumbnails: settings_cached_thumbnails;
+                dark-mode <=> dark_mode;
+
+                browse-archive-path => { browse_archive_path(); }
+                browse-cache-path => { browse_cache_path(); }
+                clear-cache => { clear_cache(); }
+                save-settings => { save_settings(); }
+                reset-defaults => { reset_defaults(); }
+            }
+        }
+
+        // Status bar
+        Rectangle {
+            height: 32px;
+            background: Theme.colors.statusbar_bg;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 16px;
+
+                Text {
+                    text: status_text != "" ? status_text : "Ready";
+                    font-size: 10pt;
+                    color: Theme.colors.statusbar_text;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                if scanning : Text {
+                    text: "Scanning...";
+                    font-size: 10pt;
+                    color: Theme.colors.accent_warning;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    // Progress animation timer (runs when scanning)
     Timer {
         interval: 24ms;
         running: scanning;
@@ -76,229 +284,4 @@ export component MainWindow inherits Window {
             }
         }
     }
-        }
-
-        HorizontalLayout {
-            spacing: 8px;
-
-            LineEdit {
-                placeholder-text: "Target directory for moved duplicates…";
-                text <=> target_path;
-                horizontal-stretch: 1.0;
-                enabled: !scanning;
-            }
-
-            Button {
-                text: "Browse";
-                clicked => { browse_target(); }
-                enabled: !scanning;
-            }
-
-            Button {
-                text: "Move Selected";
-                clicked => { move_requested(); }
-                enabled: !scanning;
-            }
-        }
-
-        HorizontalLayout {
-            spacing: 16px;
-
-            CheckBox {
-                text: "Rename while scanning (using GUID for file names)?";
-                checked <=> rename_to_guid;
-                enabled: !scanning;
-            }
-
-            CheckBox {
-                text: "Tag low quality photos";
-                checked <=> detect_low_resolution;
-                enabled: !scanning;
-            }
-
-            CheckBox {
-                text: "Classify images (AI)";
-                checked <=> enable_classification;
-                enabled: !scanning;
-            }
-        }
-
-        Rectangle {
-            visible: scanning;
-            width: 100%;
-            height: 10px;
-            border-radius: 5px;
-            background: #d9e2ec;
-            clip: true;
-
-            Rectangle {
-                width: parent.width * 0.28;
-                height: parent.height;
-                x: (parent.width + self.width) * progress_phase - self.width;
-                background: #2c3e50;
-                opacity: 0.85;
-            }
-        }
-
-        Text {
-            visible: !scanning;
-            text: status_text;
-            font-size: 12pt;
-            color: #2c3e50;
-        }
-
-        Rectangle {
-            border-radius: 8px;
-            border-width: 1px;
-            border-color: #cccccc;
-            clip: true;
-
-            ScrollView {
-                ListView {
-                    for group[group_index] in groups : Rectangle {
-                        border-width: 0px;
-
-                        VerticalLayout {
-                            padding: 8px;
-                            spacing: 6px;
-
-                            Text {
-                                text: group.file_count == 1 ? "Low Resolution" : "Duplicates (" + group.file_count + " files)";
-                                font-weight: 600;
-                                color: group.file_count == 1 ? #e74c3c : #2c3e50;
-                            }
-
-                            HorizontalLayout {
-                                spacing: 12px;
-
-                                for file[file_index] in group.files : Rectangle {
-                                    width: 160px;
-                                    height: 200px;
-                                    border-width: 1px;
-                                    border-color: file.selected ? #10893e : #cccccc;
-                                    border-radius: 8px;
-
-                                    VerticalLayout {
-                                        padding: 6px;
-                                        spacing: 6px;
-
-                                        Image {
-                                            source: file.thumbnail;
-                                            height: 110px;
-                                            horizontal-stretch: 1.0;
-                                            image-fit: contain;
-                                        }
-
-                                        Text {
-                                            text: file.display_name;
-                                            font-weight: 600;
-                                        }
-
-                                        Text {
-                                            text: file.info;
-                                            wrap: word-wrap;
-                                            font-size: 9pt;
-                                        }
-
-                                        if file.resolution_tier == 1 : Rectangle {
-                                            height: 18px;
-                                            border-radius: 4px;
-                                            background: #e67e22;
-
-                                            Text {
-                                                text: "MOBILE";
-                                                font-size: 8pt;
-                                                font-weight: 700;
-                                                color: #ffffff;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-
-                                        if file.resolution_tier == 2 : Rectangle {
-                                            height: 18px;
-                                            border-radius: 4px;
-                                            background: #e74c3c;
-
-                                            Text {
-                                                text: "LOW RES";
-                                                font-size: 8pt;
-                                                font-weight: 700;
-                                                color: #ffffff;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-
-                                        // Moderation tier badge (if classified)
-                                        if file.moderation_tier == "Sensitive" : Rectangle {
-                                            height: 18px;
-                                            border-radius: 4px;
-                                            background: #f39c12;
-
-                                            Text {
-                                                text: "SENSITIVE";
-                                                font-size: 8pt;
-                                                font-weight: 700;
-                                                color: #ffffff;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-
-                                        if file.moderation_tier == "Mature" : Rectangle {
-                                            height: 18px;
-                                            border-radius: 4px;
-                                            background: #e74c3c;
-
-                                            Text {
-                                                text: "MATURE";
-                                                font-size: 8pt;
-                                                font-weight: 700;
-                                                color: #ffffff;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-
-                                        if file.moderation_tier == "Restricted" : Rectangle {
-                                            height: 18px;
-                                            border-radius: 4px;
-                                            background: #8e44ad;
-
-                                            Text {
-                                                text: "RESTRICTED";
-                                                font-size: 8pt;
-                                                font-weight: 700;
-                                                color: #ffffff;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-
-                                        // Tags (if available)
-                                        if file.tags != "" : Text {
-                                            text: file.tags;
-                                            wrap: word-wrap;
-                                            font-size: 8pt;
-                                            color: #7f8c8d;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        width: 100%;
-                                        height: 100%;
-                                        clicked => { file_toggled(group_index, file_index); }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-        }
-    }
-
 }
-

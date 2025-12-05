@@ -1,0 +1,162 @@
+// PhotoCard component - displays a photo thumbnail with metadata and badges
+
+import { ResolutionBadge, ModerationBadge } from "badge.slint";
+import { Theme } from "theme.slint";
+
+export struct PhotoData {
+    id: int,
+    display_name: string,
+    info: string,
+    thumbnail: image,
+    selected: bool,
+    // Resolution tier: 0=High, 1=Mobile, 2=Low
+    resolution_tier: int,
+    // Orientation: 0=Landscape, 1=Portrait, 2=Square
+    orientation: int,
+    // AI moderation tier: "" (none), "Safe", "Sensitive", "Mature", "Restricted"
+    moderation_tier: string,
+    // AI-generated tags (comma-separated)
+    tags: string,
+    // For duplicate groups
+    is_keep_candidate: bool,
+    group_id: int,
+}
+
+export component PhotoCard inherits Rectangle {
+    in property <PhotoData> photo;
+    in property <bool> show-selection: true;
+    in property <bool> compact: false;
+
+    callback clicked();
+    callback toggle-selected();
+
+    width: compact ? 120px : 160px;
+    height: compact ? 160px : 220px;
+    border-width: 1px;
+    border-color: photo.selected ? Theme.selection_color : Theme.colors.border_default;
+    border-radius: 8px;
+    background: Theme.colors.bg_card;
+    clip: true;
+
+    // Hover effect
+    states [
+        hovered when touch.has-hover: {
+            background: Theme.colors.bg_hover;
+        }
+    ]
+
+    VerticalLayout {
+        padding: 6px;
+        spacing: 4px;
+
+        // Thumbnail container
+        Rectangle {
+            height: compact ? 80px : 110px;
+            border-radius: 4px;
+            clip: true;
+            background: Theme.colors.bg_secondary;
+
+            Image {
+                source: photo.thumbnail;
+                width: 100%;
+                height: 100%;
+                image-fit: contain;
+            }
+
+            // Selection indicator overlay
+            if show-selection && photo.selected : Rectangle {
+                x: parent.width - 24px;
+                y: 4px;
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                background: Theme.selection_color;
+
+                Text {
+                    text: "\u{2713}";
+                    color: white;
+                    font-size: 12pt;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Keep candidate indicator
+            if photo.is_keep_candidate : Rectangle {
+                x: 4px;
+                y: 4px;
+                height: 18px;
+                padding-left: 6px;
+                padding-right: 6px;
+                border-radius: 4px;
+                background: Theme.badge_keep;
+
+                Text {
+                    text: "KEEP";
+                    color: white;
+                    font-size: 7pt;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // File name
+        Text {
+            text: photo.display_name;
+            font-weight: 600;
+            font-size: compact ? 9pt : 10pt;
+            overflow: elide;
+            color: Theme.colors.text_primary;
+        }
+
+        // File info (size, dimensions, date)
+        Text {
+            text: photo.info;
+            wrap: word-wrap;
+            font-size: compact ? 8pt : 9pt;
+            color: Theme.colors.text_secondary;
+        }
+
+        // Badges row
+        HorizontalLayout {
+            spacing: 4px;
+
+            ResolutionBadge {
+                tier: photo.resolution_tier;
+            }
+
+            ModerationBadge {
+                tier: photo.moderation_tier;
+            }
+        }
+
+        // Tags (if available and not compact)
+        if !compact && photo.tags != "" : Text {
+            text: photo.tags;
+            wrap: word-wrap;
+            font-size: 8pt;
+            color: Theme.colors.text_muted;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => {
+            if show-selection {
+                toggle-selected();
+            }
+            clicked();
+        }
+    }
+}
+
+// Compact card variant for dense grids
+export component PhotoCardCompact inherits PhotoCard {
+    compact: true;
+    show-selection: false;
+}

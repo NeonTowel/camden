@@ -1,0 +1,256 @@
+// FilterSidebar component - checkbox filters for organization view
+
+import { CheckBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+// Section header component
+component SectionHeader inherits Rectangle {
+    in property <string> title;
+    in property <bool> expanded: true;
+
+    callback toggle-expanded();
+
+    height: 28px;
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: 4px;
+        padding-left: 4px;
+
+        Text {
+            text: expanded ? "\u{25BC}" : "\u{25B6}";
+            font-size: 8pt;
+            color: Theme.colors.text_secondary;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: title;
+            font-size: 10pt;
+            font-weight: 600;
+            color: Theme.colors.text_primary;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { toggle-expanded(); }
+    }
+}
+
+// Tag item component
+component TagItem inherits Rectangle {
+    in property <string> name;
+    in property <int> count;
+    in property <bool> selected: false;
+
+    callback clicked();
+
+    height: 24px;
+    background: selected ? Theme.colors.accent_primary.with_alpha(0.15) : transparent;
+    border-radius: 4px;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 4px;
+
+        Text {
+            text: name;
+            font-size: 9pt;
+            color: selected ? Theme.colors.accent_primary : Theme.colors.text_primary;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: "(" + count + ")";
+            font-size: 8pt;
+            color: Theme.colors.text_muted;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { clicked(); }
+    }
+}
+
+export component FilterSidebar inherits Rectangle {
+    // Individual filter properties (instead of struct)
+    in-out property <bool> show-landscape: true;
+    in-out property <bool> show-portrait: true;
+    in-out property <bool> show-square: true;
+    in-out property <bool> show-high-res: true;
+    in-out property <bool> show-mobile-res: true;
+    in-out property <bool> show-low-res: true;
+    in-out property <bool> show-safe: true;
+    in-out property <bool> show-sensitive: true;
+    in-out property <bool> show-mature: true;
+    in-out property <bool> show-restricted: true;
+    in-out property <string> tag-search: "";
+
+    // Tag data (populated from Rust)
+    in property <[{name: string, count: int}]> available-tags: [];
+
+    callback filter-changed();
+    callback tag-selected(string);
+
+    width: 200px;
+    background: Theme.colors.bg_secondary;
+    border-width: 0px;
+    border-color: Theme.colors.border_default;
+
+    // Section expand states
+    property <bool> orientation-expanded: true;
+    property <bool> resolution-expanded: true;
+    property <bool> content-expanded: true;
+    property <bool> tags-expanded: true;
+
+    ScrollView {
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            // Title
+            Text {
+                text: "FILTERS";
+                font-size: 11pt;
+                font-weight: 700;
+                color: Theme.colors.text_primary;
+                letter-spacing: 1px;
+            }
+
+            Rectangle { height: 8px; }
+
+            // Orientation Section
+            SectionHeader {
+                title: "Orientation";
+                expanded: orientation-expanded;
+                toggle-expanded => { orientation-expanded = !orientation-expanded; }
+            }
+
+            if orientation-expanded : VerticalLayout {
+                spacing: 4px;
+                padding-left: 8px;
+
+                CheckBox {
+                    text: "Landscape";
+                    checked <=> show-landscape;
+                    toggled => { filter-changed(); }
+                }
+                CheckBox {
+                    text: "Portrait";
+                    checked <=> show-portrait;
+                    toggled => { filter-changed(); }
+                }
+                CheckBox {
+                    text: "Square";
+                    checked <=> show-square;
+                    toggled => { filter-changed(); }
+                }
+            }
+
+            Rectangle { height: 4px; }
+
+            // Resolution Section
+            SectionHeader {
+                title: "Resolution";
+                expanded: resolution-expanded;
+                toggle-expanded => { resolution-expanded = !resolution-expanded; }
+            }
+
+            if resolution-expanded : VerticalLayout {
+                spacing: 4px;
+                padding-left: 8px;
+
+                CheckBox {
+                    text: "High (\u{2265}1200px)";
+                    checked <=> show-high-res;
+                    toggled => { filter-changed(); }
+                }
+                CheckBox {
+                    text: "Mobile (850-1199px)";
+                    checked <=> show-mobile-res;
+                    toggled => { filter-changed(); }
+                }
+                CheckBox {
+                    text: "Low (<850px)";
+                    checked <=> show-low-res;
+                    toggled => { filter-changed(); }
+                }
+            }
+
+            Rectangle { height: 4px; }
+
+            // Content Section
+            SectionHeader {
+                title: "Content";
+                expanded: content-expanded;
+                toggle-expanded => { content-expanded = !content-expanded; }
+            }
+
+            if content-expanded : VerticalLayout {
+                spacing: 4px;
+                padding-left: 8px;
+
+                CheckBox {
+                    text: "Safe";
+                    checked <=> show-safe;
+                    toggled => { filter-changed(); }
+                }
+                CheckBox {
+                    text: "Sensitive";
+                    checked <=> show-sensitive;
+                    toggled => { filter-changed(); }
+                }
+                CheckBox {
+                    text: "Mature";
+                    checked <=> show-mature;
+                    toggled => { filter-changed(); }
+                }
+                CheckBox {
+                    text: "Restricted";
+                    checked <=> show-restricted;
+                    toggled => { filter-changed(); }
+                }
+            }
+
+            Rectangle { height: 4px; }
+
+            // Tags Section
+            SectionHeader {
+                title: "Tags";
+                expanded: tags-expanded;
+                toggle-expanded => { tags-expanded = !tags-expanded; }
+            }
+
+            if tags-expanded : VerticalLayout {
+                spacing: 4px;
+                padding-left: 4px;
+
+                LineEdit {
+                    placeholder-text: "Search tags...";
+                    text <=> tag-search;
+                    edited => { filter-changed(); }
+                }
+
+                Rectangle { height: 4px; }
+
+                for tag in available-tags : TagItem {
+                    name: tag.name;
+                    count: tag.count;
+                    selected: false;
+                    clicked => { tag-selected(tag.name); }
+                }
+            }
+
+            // Spacer to push content up
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+}

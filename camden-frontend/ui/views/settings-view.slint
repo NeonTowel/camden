@@ -1,0 +1,273 @@
+// SettingsView - configuration and preferences
+
+import { Button, LineEdit, CheckBox, ScrollView } from "std-widgets.slint";
+import { Theme } from "../components/theme.slint";
+
+export struct AppSettings {
+    archive_path: string,
+    thumbnail_cache_path: string,
+    landscape_min_width: int,
+    portrait_min_height: int,
+    mobile_min_height: int,
+    show_tags: bool,
+    max_tags_shown: int,
+    compact_cards: bool,
+    cache_size_mb: float,
+    cached_thumbnails: int,
+}
+
+component SettingsSection inherits Rectangle {
+    in property <string> title;
+
+    border-radius: 8px;
+    background: Theme.colors.bg_secondary;
+    border-width: 1px;
+    border-color: Theme.colors.border_default;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        Text {
+            text: title;
+            font-size: 12pt;
+            font-weight: 600;
+            color: Theme.colors.text_primary;
+        }
+
+        @children
+    }
+}
+
+component SettingsRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> description: "";
+
+    spacing: 16px;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 2px;
+
+        Text {
+            text: label;
+            font-size: 10pt;
+            color: Theme.colors.text_primary;
+        }
+
+        if description != "" : Text {
+            text: description;
+            font-size: 9pt;
+            color: Theme.colors.text_muted;
+        }
+    }
+
+    @children
+}
+
+export component SettingsView inherits Rectangle {
+    // Individual settings properties
+    in-out property <string> archive-path: "";
+    in-out property <string> cache-path: "";
+    in-out property <bool> show-tags: true;
+    in-out property <bool> compact-cards: false;
+    in-out property <bool> dark-mode: true;
+
+    // Read-only stats
+    in property <float> cache-size-mb: 0.0;
+    in property <int> cached-thumbnails: 0;
+
+    callback browse-archive-path();
+    callback browse-cache-path();
+    callback clear-cache();
+    callback save-settings();
+    callback reset-defaults();
+
+    background: Theme.colors.bg_card;
+
+    ScrollView {
+        VerticalLayout {
+            padding: 24px;
+            spacing: 20px;
+
+            // Header
+            Text {
+                text: "Settings";
+                font-size: 20pt;
+                font-weight: 700;
+                color: Theme.colors.text_primary;
+            }
+
+            // Paths Section
+            SettingsSection {
+                title: "File Locations";
+
+                SettingsRow {
+                    label: "Archive Folder";
+                    description: "Where archived/moved photos are stored";
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        LineEdit {
+                            text <=> archive-path;
+                            horizontal-stretch: 1;
+                            min-width: 250px;
+                        }
+
+                        Button {
+                            text: "Browse...";
+                            clicked => { browse-archive-path(); }
+                        }
+                    }
+                }
+
+                SettingsRow {
+                    label: "Thumbnail Cache";
+                    description: "Where thumbnail previews are stored";
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        LineEdit {
+                            text <=> cache-path;
+                            horizontal-stretch: 1;
+                            min-width: 250px;
+                        }
+
+                        Button {
+                            text: "Browse...";
+                            clicked => { browse-cache-path(); }
+                        }
+                    }
+                }
+            }
+
+            // Display Preferences Section
+            SettingsSection {
+                title: "Display Preferences";
+
+                SettingsRow {
+                    label: "Dark mode";
+                    description: "Use dark color scheme (easier on the eyes)";
+
+                    CheckBox {
+                        checked <=> dark-mode;
+                    }
+                }
+
+                SettingsRow {
+                    label: "Show AI tags on photo cards";
+
+                    CheckBox {
+                        checked <=> show-tags;
+                    }
+                }
+
+                SettingsRow {
+                    label: "Use compact photo cards";
+                    description: "Smaller cards to fit more photos on screen";
+
+                    CheckBox {
+                        checked <=> compact-cards;
+                    }
+                }
+            }
+
+            // Cache Management Section
+            SettingsSection {
+                title: "Cache Management";
+
+                HorizontalLayout {
+                    spacing: 24px;
+
+                    VerticalLayout {
+                        spacing: 4px;
+
+                        Text {
+                            text: "Cache size";
+                            font-size: 10pt;
+                            color: Theme.colors.text_secondary;
+                        }
+
+                        Text {
+                            text: round(cache-size-mb * 10) / 10 + " MB";
+                            font-size: 14pt;
+                            font-weight: 600;
+                            color: Theme.colors.text_primary;
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 4px;
+
+                        Text {
+                            text: "Cached thumbnails";
+                            font-size: 10pt;
+                            color: Theme.colors.text_secondary;
+                        }
+
+                        Text {
+                            text: cached-thumbnails;
+                            font-size: 14pt;
+                            font-weight: 600;
+                            color: Theme.colors.text_primary;
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    Button {
+                        text: "Clear Cache";
+                        clicked => { clear-cache(); }
+                    }
+                }
+            }
+
+            // Action buttons
+            HorizontalLayout {
+                spacing: 12px;
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Button {
+                    text: "Reset to Defaults";
+                    clicked => { reset-defaults(); }
+                }
+
+                Button {
+                    text: "Save Settings";
+                    clicked => { save-settings(); }
+                }
+            }
+
+            // About section
+            SettingsSection {
+                title: "About Camden";
+
+                Text {
+                    text: "Camden Photo Manager";
+                    font-size: 11pt;
+                    font-weight: 600;
+                    color: Theme.colors.text_primary;
+                }
+
+                Text {
+                    text: "A fast, AI-powered photo organizer for finding duplicates,\nclassifying images, and managing your photo library.";
+                    font-size: 10pt;
+                    color: Theme.colors.text_secondary;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: "Built with Rust + Slint";
+                    font-size: 9pt;
+                    color: Theme.colors.text_muted;
+                }
+            }
+
+            // Spacer
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+}

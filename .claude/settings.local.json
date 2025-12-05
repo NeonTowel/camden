@@ -12,7 +12,8 @@
       "Bash(task build:*)",
       "Bash(./target/debug/camden.exe:*)",
       "Bash(cargo build:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(task frontend:*)"
     ],
     "deny": [],
     "ask": []

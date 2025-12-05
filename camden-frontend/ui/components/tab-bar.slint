@@ -1,0 +1,97 @@
+// TabBar component - horizontal tab navigation
+
+import { Theme } from "theme.slint";
+
+export component TabButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    in property <string> icon: "";
+
+    callback clicked();
+
+    min-width: 100px;
+    height: 40px;
+    background: active ? Theme.colors.tab_active_bg : transparent;
+    border-radius: active ? 8px : 0px;
+
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 6px;
+
+        if icon != "" : Text {
+            text: icon;
+            font-size: 14pt;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: label;
+            font-size: 11pt;
+            font-weight: active ? 600 : 400;
+            color: active ? Theme.colors.text_primary : Theme.colors.text_secondary;
+            vertical-alignment: center;
+        }
+    }
+
+    // Active indicator line
+    if active : Rectangle {
+        y: parent.height - 3px;
+        height: 3px;
+        width: 100%;
+        background: Theme.colors.tab_indicator;
+        border-radius: 2px;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { clicked(); }
+    }
+}
+
+export component TabBar inherits Rectangle {
+    in-out property <int> active-tab: 0;
+
+    callback tab-changed(int);
+
+    height: 44px;
+    background: Theme.colors.tab_bg;
+    border-radius: 8px;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 4px;
+
+        TabButton {
+            label: "Scan";
+            icon: "\u{1F4C1}";
+            active: active-tab == 0;
+            clicked => { active-tab = 0; tab-changed(0); }
+        }
+
+        TabButton {
+            label: "Duplicates";
+            icon: "\u{1F504}";
+            active: active-tab == 1;
+            clicked => { active-tab = 1; tab-changed(1); }
+        }
+
+        TabButton {
+            label: "Organize";
+            icon: "\u{1F5BC}";
+            active: active-tab == 2;
+            clicked => { active-tab = 2; tab-changed(2); }
+        }
+
+        TabButton {
+            label: "Settings";
+            icon: "\u{2699}";
+            active: active-tab == 3;
+            clicked => { active-tab = 3; tab-changed(3); }
+        }
+
+        // Spacer
+        Rectangle { horizontal-stretch: 1; }
+    }
+}

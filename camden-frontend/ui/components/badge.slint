@@ -1,0 +1,67 @@
+// Badge component for resolution and content tier indicators
+
+import { Theme } from "theme.slint";
+
+export component Badge inherits Rectangle {
+    in property <string> label;
+    in property <color> bg-color: Theme.colors.text_primary;
+    in property <bool> visible-when: true;
+
+    visible: visible-when && label != "";
+    height: 18px;
+    min-width: 40px;
+    border-radius: 4px;
+    background: bg-color;
+    padding-left: 6px;
+    padding-right: 6px;
+
+    Text {
+        text: label;
+        font-size: 8pt;
+        font-weight: 700;
+        color: #ffffff;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// Preset badge types for common use cases
+export component ResolutionBadge inherits Badge {
+    in property <int> tier: 0;  // 0=High, 1=Mobile, 2=Low
+
+    label: tier == 1 ? "MOBILE" : tier == 2 ? "LOW" : "";
+    bg-color: tier == 1 ? Theme.badge_mobile_res : tier == 2 ? Theme.badge_low_res : transparent;
+    visible-when: tier > 0;
+}
+
+export component ModerationBadge inherits Badge {
+    in property <string> tier: "";  // "", "Safe", "Sensitive", "Mature", "Restricted"
+
+    label: tier == "Sensitive" ? "SENSITIVE" :
+           tier == "Mature" ? "MATURE" :
+           tier == "Restricted" ? "RESTRICTED" : "";
+    bg-color: tier == "Sensitive" ? Theme.badge_sensitive :
+              tier == "Mature" ? Theme.badge_mature :
+              tier == "Restricted" ? Theme.badge_restricted : transparent;
+    visible-when: tier != "" && tier != "Safe";
+}
+
+// Small icon-style badge for compact views
+export component IconBadge inherits Rectangle {
+    in property <string> icon: "";
+    in property <color> bg-color: Theme.colors.text_secondary;
+    in property <bool> visible-when: true;
+
+    visible: visible-when;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: bg-color;
+
+    Text {
+        text: icon;
+        font-size: 10pt;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

@@ -1,0 +1,342 @@
+// GalleryView - filtered photo gallery with organization features
+
+import { Button, ScrollView } from "std-widgets.slint";
+import { PhotoData, PhotoCard } from "../components/photo-card.slint";
+import { FilterSidebar } from "../components/filter-sidebar.slint";
+import { Theme } from "../components/theme.slint";
+
+export struct GalleryStats {
+    total_photos: int,
+    filtered_photos: int,
+    selected_count: int,
+    landscape_count: int,
+    portrait_count: int,
+    square_count: int,
+}
+
+export component GalleryView inherits Rectangle {
+    in property <[PhotoData]> photos: [];
+    in property <GalleryStats> stats: {
+        total_photos: 0,
+        filtered_photos: 0,
+        selected_count: 0,
+        landscape_count: 0,
+        portrait_count: 0,
+        square_count: 0,
+    };
+
+    // Tag data for filter sidebar
+    in property <[{name: string, count: int}]> available-tags: [];
+
+    // Filter state - individual properties
+    in-out property <bool> show-landscape: true;
+    in-out property <bool> show-portrait: true;
+    in-out property <bool> show-square: true;
+    in-out property <bool> show-high-res: true;
+    in-out property <bool> show-mobile-res: true;
+    in-out property <bool> show-low-res: true;
+    in-out property <bool> show-safe: true;
+    in-out property <bool> show-sensitive: true;
+    in-out property <bool> show-mature: true;
+    in-out property <bool> show-restricted: true;
+    in-out property <string> tag-search: "";
+
+    callback photo-clicked(int);
+    callback photo-toggle-selected(int);
+    callback filter-changed();
+    callback export-selected();
+    callback archive-selected();
+    callback select-all();
+    callback deselect-all();
+
+    background: Theme.colors.bg_secondary;
+
+    HorizontalLayout {
+        // Filter sidebar
+        sidebar := FilterSidebar {
+            show-landscape <=> show-landscape;
+            show-portrait <=> show-portrait;
+            show-square <=> show-square;
+            show-high-res <=> show-high-res;
+            show-mobile-res <=> show-mobile-res;
+            show-low-res <=> show-low-res;
+            show-safe <=> show-safe;
+            show-sensitive <=> show-sensitive;
+            show-mature <=> show-mature;
+            show-restricted <=> show-restricted;
+            tag-search <=> tag-search;
+            available-tags: available-tags;
+            filter-changed => { filter-changed(); }
+        }
+
+        // Main content area
+        Rectangle {
+            horizontal-stretch: 1;
+            background: Theme.colors.bg_card;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                // Header row
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    Text {
+                        text: "Photo Gallery";
+                        font-size: 16pt;
+                        font-weight: 600;
+                        color: Theme.colors.text_primary;
+                        vertical-alignment: center;
+                    }
+
+                    // Count badge
+                    Rectangle {
+                        height: 24px;
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        border-radius: 4px;
+                        background: Theme.colors.accent_primary.with_alpha(0.15);
+
+                        Text {
+                            text: stats.filtered_photos + " of " + stats.total_photos + " photos";
+                            font-size: 10pt;
+                            color: Theme.colors.accent_primary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    // Orientation quick filters
+                    HorizontalLayout {
+                        spacing: 4px;
+
+                        Rectangle {
+                            width: 36px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: show-landscape ? Theme.colors.accent_primary.with_alpha(0.15) : Theme.colors.bg_secondary;
+                            border-width: 1px;
+                            border-color: show-landscape ? Theme.colors.accent_primary.with_alpha(0.5) : Theme.colors.border_default;
+
+                            Text {
+                                text: "\u{1F5BC}";
+                                font-size: 14pt;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => {
+                                    show-landscape = !show-landscape;
+                                    filter-changed();
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 36px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: show-portrait ? Theme.colors.accent_primary.with_alpha(0.15) : Theme.colors.bg_secondary;
+                            border-width: 1px;
+                            border-color: show-portrait ? Theme.colors.accent_primary.with_alpha(0.5) : Theme.colors.border_default;
+
+                            Text {
+                                text: "\u{1F4F1}";
+                                font-size: 14pt;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => {
+                                    show-portrait = !show-portrait;
+                                    filter-changed();
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 36px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: show-square ? Theme.colors.accent_primary.with_alpha(0.15) : Theme.colors.bg_secondary;
+                            border-width: 1px;
+                            border-color: show-square ? Theme.colors.accent_primary.with_alpha(0.5) : Theme.colors.border_default;
+
+                            Text {
+                                text: "\u{2B1C}";
+                                font-size: 14pt;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => {
+                                    show-square = !show-square;
+                                    filter-changed();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Selection toolbar
+                if stats.selected_count > 0 : Rectangle {
+                    height: 40px;
+                    border-radius: 8px;
+                    background: Theme.colors.accent_success.with_alpha(0.15);
+                    border-width: 1px;
+                    border-color: Theme.colors.accent_success.with_alpha(0.5);
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 12px;
+
+                        Text {
+                            text: stats.selected_count + " selected";
+                            font-size: 10pt;
+                            font-weight: 600;
+                            color: Theme.colors.accent_success;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        Button {
+                            text: "Export to Folder...";
+                            clicked => { export-selected(); }
+                        }
+
+                        Button {
+                            text: "Archive";
+                            clicked => { archive-selected(); }
+                        }
+
+                        Button {
+                            text: "Deselect All";
+                            clicked => { deselect-all(); }
+                        }
+                    }
+                }
+
+                // Stats row
+                HorizontalLayout {
+                    spacing: 16px;
+
+                    // Landscape count
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Text {
+                            text: "\u{1F5BC}";
+                            font-size: 12pt;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: stats.landscape_count;
+                            font-size: 10pt;
+                            color: Theme.colors.text_secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Portrait count
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Text {
+                            text: "\u{1F4F1}";
+                            font-size: 12pt;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: stats.portrait_count;
+                            font-size: 10pt;
+                            color: Theme.colors.text_secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Square count
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Text {
+                            text: "\u{2B1C}";
+                            font-size: 12pt;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: stats.square_count;
+                            font-size: 10pt;
+                            color: Theme.colors.text_secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                // Empty state
+                if photos.length == 0 : Rectangle {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 12px;
+
+                        Text {
+                            text: "\u{1F5BC}";
+                            font-size: 48pt;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: "No photos to display";
+                            font-size: 14pt;
+                            font-weight: 600;
+                            color: Theme.colors.text_secondary;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: "Run a scan or adjust your filters";
+                            font-size: 11pt;
+                            color: Theme.colors.text_muted;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                // Photo grid
+                if photos.length > 0 : ScrollView {
+                    VerticalLayout {
+                        spacing: 12px;
+                        padding-bottom: 16px;
+
+                        // Wrap photos in rows (4 per row for now)
+                        for row-start in [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96, 100] : HorizontalLayout {
+                            spacing: 12px;
+                            visible: row-start < photos.length;
+
+                            for col in [0, 1, 2, 3] : Rectangle {
+                                visible: (row-start + col) < photos.length;
+                                width: self.visible ? 160px : 0px;
+
+                                if (row-start + col) < photos.length : PhotoCard {
+                                    photo: photos[row-start + col];
+                                    show-selection: true;
+                                    clicked => { photo-clicked(row-start + col); }
+                                    toggle-selected => { photo-toggle-selected(row-start + col); }
+                                }
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
