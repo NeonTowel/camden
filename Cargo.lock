@@ -804,6 +804,8 @@ dependencies = [
  "dirs",
  "indicatif",
  "rfd",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
 ]

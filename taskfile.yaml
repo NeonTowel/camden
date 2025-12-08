@@ -239,6 +239,15 @@ tasks:
             "https://huggingface.co/taufiqdp/mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier/resolve/main/mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx"
         fi
 
+        # Vladmandic NudeNet - Body part detection for ensemble
+        if [ -f ".vendor/models/vladmandic-nudenet.onnx" ]; then
+          echo "[moderation] Vladmandic NudeNet already downloaded."
+        else
+          echo "[moderation] Downloading Vladmandic NudeNet (body part detection, ~12MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/vladmandic-nudenet.onnx" \
+            "https://huggingface.co/vladmandic/nudenet/resolve/main/nudenet.onnx"
+        fi
+
         echo ""
         echo "HuggingFace models downloaded to .vendor/models/"
         echo ""
@@ -254,15 +263,21 @@ tasks:
         echo "  - wd-tags.csv (tag list)"
         echo ""
         echo "Moderation models downloaded:"
-        echo "  - onnx-community-nsfw.onnx"
-        echo "  - nsfwjs.onnx"
-        echo "  - adamcodd-vit-base-nsfw.onnx (AdamCodd)"
-        echo "  - spiele-nsfw.onnx"
-        echo "  - taufiqdp-mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx"
+        echo "  - onnx-community-nsfw.onnx (343MB)"
+        echo "  - nsfwjs.onnx (10MB)"
+        echo "  - adamcodd-vit-base-nsfw.onnx (344MB)"
+        echo "  - spiele-nsfw.onnx (~100MB)"
+        echo "  - taufiqdp-mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx (10MB)"
+        echo "  - vladmandic-nudenet.onnx (12MB) ⭐ for ensemble"
         echo ""
         echo "To use these models, update camden-classifier.toml:"
-        echo "  tagging_model = \"wd-vit-tagger-v3\"  # or \"vit-base-224\""
-        echo "  moderation_model = \"adamcodd-vit-nsfw\"  # or \"gantman-nsfw\""
+        echo "  # Single model mode:"
+        echo "  moderation_model = \"gantman-nsfw\"  # or \"adamcodd-vit-nsfw\""
+        echo "  tagging_model = \"mobilenetv2\"  # or \"wd-vit-tagger-v3\""
+        echo ""
+        echo "  # OR ensemble mode (recommended):"
+        echo "  moderation_models = [\"gantman-nsfw\", \"vladmandic-nudenet\"]"
+        echo "  tagging_models = [\"mobilenetv2\", \"vit-base-224-q8\"]"
 
   convert-hf-model:
     desc: Convert a HuggingFace model to ONNX (requires Python + torch)

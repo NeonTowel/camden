@@ -1,0 +1,59 @@
+# Camden Multi-Model Ensemble Configuration Example
+#
+# This configuration demonstrates how to use multiple ONNX models for improved
+# content moderation accuracy through ensemble classification.
+
+models_dir = ".vendor/models"
+ort_library = ".vendor/onnxruntime/lib/onnxruntime.dll"
+
+# ENSEMBLE MODE: Specify multiple moderation models
+# Results are aggregated using averaging by default
+moderation_models = [
+    "gantman-nsfw",          # 5-class baseline model (InceptionV3, 89MB)
+    "vladmandic-nudenet",    # Body part detection (12MB)
+    "adamcodd-vit-nsfw",     # ViT-based high accuracy (344MB)
+]
+
+# TAGGING ENSEMBLE MODE: Specify multiple tagging models
+# Tags from all models are merged and confidence scores averaged
+tagging_models = [
+    "mobilenetv2",           # Lightweight ImageNet (1000 classes)
+    "vit-base-224-q8",       # Vision Transformer (quantized)
+]
+
+# OR use single models (backward compatible):
+# tagging_model = "mobilenetv2"
+# moderation_model = "gantman-nsfw"
+
+# Alternative ensemble configurations:
+#
+# Option 1: Lightweight (2 models, ~100MB) - Recommended ⭐
+# moderation_models = ["gantman-nsfw", "vladmandic-nudenet"]
+#
+# Option 2: Balanced (3 models, ~445MB)
+# moderation_models = [
+#     "gantman-nsfw",
+#     "vladmandic-nudenet",
+#     "adamcodd-vit-nsfw",
+# ]
+#
+# Option 3: High-accuracy (4 models, ~545MB)
+# moderation_models = [
+#     "gantman-nsfw",
+#     "adamcodd-vit-nsfw",
+#     "vladmandic-nudenet",
+#     "spiele-nsfw",
+# ]
+#
+# Option 4: ViT-focused ensemble
+# moderation_models = [
+#     "adamcodd-vit-nsfw",
+#     "onnx-community-nsfw",
+# ]
+
+# How ensemble aggregation works:
+# - Average: Averages probability scores across all models (default)
+# - MaxTier: Uses the most restrictive tier from any model (most conservative)
+#
+# The ensemble runs all models in parallel and combines their predictions
+# for more robust and accurate content moderation results.

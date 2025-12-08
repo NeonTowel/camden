@@ -87,18 +87,21 @@ export component PhotoCard inherits Rectangle {
                 x: 4px;
                 y: 4px;
                 height: 18px;
-                padding-left: 6px;
-                padding-right: 6px;
                 border-radius: 4px;
                 background: Theme.badge_keep;
 
-                Text {
-                    text: "KEEP";
-                    color: white;
-                    font-size: 7pt;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 6px;
+
+                    Text {
+                        text: "KEEP";
+                        color: white;
+                        font-size: 7pt;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }

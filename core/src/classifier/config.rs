@@ -174,12 +174,24 @@ pub struct ClassifierConfig {
     pub ort_library: PathBuf,
 
     /// Moderation model to use (e.g., "gantman-nsfw", "adamcodd-vit-nsfw")
+    /// For backward compatibility with single-model configs
     #[serde(default, alias = "active_moderation")]
     pub moderation_model: Option<String>,
 
+    /// Multiple moderation models for ensemble classification
+    /// If specified, takes precedence over moderation_model
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub moderation_models: Vec<String>,
+
     /// Tagging model to use (e.g., "mobilenetv2", "wd-vit-tagger-v3")
+    /// For backward compatibility with single-model configs
     #[serde(default, alias = "active_tagging")]
     pub tagging_model: Option<String>,
+
+    /// Multiple tagging models for ensemble classification
+    /// If specified, takes precedence over tagging_model
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tagging_models: Vec<String>,
 
     /// Custom model configurations (optional, overrides built-in presets)
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -217,7 +229,9 @@ impl Default for ClassifierConfig {
             models_dir: default_models_dir(),
             ort_library: default_ort_lib(),
             moderation_model: Some("gantman-nsfw".to_string()),
+            moderation_models: Vec::new(),
             tagging_model: Some("mobilenetv2".to_string()),
+            tagging_models: Vec::new(),
             models: HashMap::new(),
             presets: Self::default_presets(),
             builtin_models,
@@ -425,6 +439,34 @@ impl ClassifierConfig {
                 enabled: true,
             },
         );
+
+        // Vladmandic NudeNet (body part detection)
+        models.insert(
+            "vladmandic-nudenet".to_string(),
+            ModelConfig {
+                name: "Vladmandic NudeNet".to_string(),
+                model_type: ModelType::Moderation,
+                path: PathBuf::from("vladmandic-nudenet.onnx"),
+                input: ModelInputSpec {
+                    width: 320,
+                    height: 320,
+                    normalize: false,
+                    layout: "NCHW".to_string(),
+                    mean: None,
+                    std: None,
+                },
+                output: ModelOutputSpec {
+                    num_classes: 2,
+                    labels: vec!["safe".to_string(), "nsfw".to_string()],
+                    labels_file: None,
+                    format: Some("nsfw_sfw".to_string()),
+                    multi_label: false,
+                },
+                description: "Vladmandic NudeNet - body part detection (12MB)".to_string(),
+                enabled: true,
+            },
+        );
+
 
         // =========================================================================
         // TAGGING MODELS - ImageNet
@@ -719,8 +761,14 @@ impl ClassifierConfig {
             if user.moderation_model.is_some() {
                 config.moderation_model = user.moderation_model;
             }
+            if !user.moderation_models.is_empty() {
+                config.moderation_models = user.moderation_models;
+            }
             if user.tagging_model.is_some() {
                 config.tagging_model = user.tagging_model;
+            }
+            if !user.tagging_models.is_empty() {
+                config.tagging_models = user.tagging_models;
             }
             // User model overrides
             for (id, model) in user.models {
@@ -767,6 +815,39 @@ impl ClassifierConfig {
             .and_then(|id| self.get_model(id))
     }
 
+    /// Get all active moderation model IDs (supports both single and ensemble modes).
+    /// Returns moderation_models if configured, otherwise falls back to moderation_model.
+    pub fn active_moderation_model_ids(&self) -> Vec<String> {
+        if !self.moderation_models.is_empty() {
+            self.moderation_models.clone()
+        } else if let Some(ref model) = self.moderation_model {
+            vec![model.clone()]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Get all active moderation model configurations.
+    pub fn active_moderation_models(&self) -> Vec<&ModelConfig> {
+        self.active_moderation_model_ids()
+            .iter()
+            .filter_map(|id| self.get_model(id))
+            .collect()
+    }
+
+    /// Get the full paths to all active moderation models.
+    pub fn active_moderation_paths(&self) -> Vec<PathBuf> {
+        self.active_moderation_model_ids()
+            .iter()
+            .filter_map(|id| self.model_path(id))
+            .collect()
+    }
+
+    /// Check if ensemble mode is enabled (multiple moderation models configured).
+    pub fn is_ensemble_mode(&self) -> bool {
+        self.moderation_models.len() > 1
+    }
+
     /// Get the full path to the active moderation model.
     pub fn active_moderation_path(&self) -> Option<PathBuf> {
         self.moderation_model
@@ -781,6 +862,39 @@ impl ClassifierConfig {
             .and_then(|id| self.model_path(id))
     }
 
+    /// Get all active tagging model IDs (supports both single and ensemble modes).
+    /// Returns tagging_models if configured, otherwise falls back to tagging_model.
+    pub fn active_tagging_model_ids(&self) -> Vec<String> {
+        if !self.tagging_models.is_empty() {
+            self.tagging_models.clone()
+        } else if let Some(ref model) = self.tagging_model {
+            vec![model.clone()]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Get all active tagging model configurations.
+    pub fn active_tagging_models(&self) -> Vec<&ModelConfig> {
+        self.active_tagging_model_ids()
+            .iter()
+            .filter_map(|id| self.get_model(id))
+            .collect()
+    }
+
+    /// Get the full paths to all active tagging models.
+    pub fn active_tagging_paths(&self) -> Vec<PathBuf> {
+        self.active_tagging_model_ids()
+            .iter()
+            .filter_map(|id| self.model_path(id))
+            .collect()
+    }
+
+    /// Check if tagging ensemble mode is enabled (multiple tagging models configured).
+    pub fn is_tagging_ensemble_mode(&self) -> bool {
+        self.tagging_models.len() > 1
+    }
+
     /// List all registered models (deprecated, use available_models instead).
     pub fn list_models(&self) -> Vec<(&str, &ModelConfig)> {
         self.available_models()
@@ -788,13 +902,15 @@ impl ClassifierConfig {
 
     /// Validate that all active models exist.
     pub fn validate(&self) -> Result<(), ClassifierError> {
-        if let Some(path) = self.active_moderation_path() {
+        // Check all active moderation models (supports ensemble mode)
+        for path in self.active_moderation_paths() {
             if !path.exists() {
                 return Err(ClassifierError::ModelNotFound(path));
             }
         }
 
-        if let Some(path) = self.active_tagging_path() {
+        // Check all active tagging models (supports ensemble mode)
+        for path in self.active_tagging_paths() {
             if !path.exists() {
                 return Err(ClassifierError::ModelNotFound(path));
             }

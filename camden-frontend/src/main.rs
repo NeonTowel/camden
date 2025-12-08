@@ -1,12 +1,13 @@
 use camden_core::{ResolutionTier, ScanConfig, ScanSummary, ThreadingMode, move_paths, scan, write_classification_report};
-use indicatif::ProgressBar;
-use slint::{Image, ModelRc, SharedString, VecModel};
+use indicatif::{ProgressBar, ProgressStyle};
+use slint::{Image, ModelRc, SharedString, VecModel, Timer, TimerMode};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use serde::{Serialize, Deserialize};
 
 slint::include_modules!();
 
@@ -26,12 +27,17 @@ struct InternalFile {
     resolution_tier: ResolutionTier,
     moderation_tier: String,
     tags: String,
+    dimensions: (u32, u32),
+    orientation: i32, // 0=Landscape, 1=Portrait, 2=Square
+    is_keep_candidate: bool,
 }
 
 #[derive(Clone)]
 struct InternalGroup {
     fingerprint: String,
     files: Vec<InternalFile>,
+    total_size_bytes: u64,
+    reclaimable_bytes: u64,
 }
 
 use std::time::Instant;
@@ -39,18 +45,119 @@ use std::time::Instant;
 #[derive(Default, Clone)]
 struct AppState {
     groups: Vec<InternalGroup>,
+    all_photos: Vec<InternalFile>, // All scanned photos for gallery
+    gallery_photos: Vec<InternalFile>, // Filtered gallery view
     scanning: bool,
     last_scan_duration: Option<std::time::Duration>,
+    archive_path: PathBuf,
+    progress_bar: Option<Arc<ProgressBar>>, // Current scan progress bar
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct AppSettings {
+    last_root_path: Option<String>,
+    last_target_path: Option<String>,
+    archive_path: Option<String>,
+    cache_path: Option<String>,
+    dark_mode: bool,
+    show_tags: bool,
+    compact_cards: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            last_root_path: None,
+            last_target_path: None,
+            archive_path: None,
+            cache_path: None,
+            dark_mode: true,
+            show_tags: true,
+            compact_cards: false,
+        }
+    }
+}
+
+fn settings_file_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|mut path| {
+        path.push("Camden");
+        fs::create_dir_all(&path).ok();
+        path.push("settings.json");
+        path
+    })
+}
+
+fn load_settings() -> AppSettings {
+    settings_file_path()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or_default()
+}
+
+fn save_settings(settings: &AppSettings) {
+    if let Some(path) = settings_file_path() {
+        if let Ok(content) = serde_json::to_string_pretty(settings) {
+            let _ = fs::write(path, content);
+        }
+    }
 }
 
 fn main() -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
-    ui.set_root_path(default_initial_root().into());
-    ui.set_target_path(default_target_path().into());
+
+    // Load settings and apply to UI
+    let settings = Arc::new(Mutex::new(load_settings()));
+    {
+        let settings = settings.lock().unwrap();
+        ui.set_root_path(settings.last_root_path.clone()
+            .unwrap_or_else(|| default_initial_root()).into());
+        ui.set_target_path(settings.last_target_path.clone()
+            .unwrap_or_else(|| default_target_path()).into());
+        ui.set_dark_mode(settings.dark_mode);
+        ui.set_settings_show_tags(settings.show_tags);
+        ui.set_settings_compact_cards(settings.compact_cards);
+        if let Some(archive) = &settings.archive_path {
+            ui.set_settings_archive_path(archive.clone().into());
+        }
+        if let Some(cache) = &settings.cache_path {
+            ui.set_settings_cache_path(cache.clone().into());
+        }
+    }
     ui.set_status_text("Select a root directory and press Scan.".into());
 
     let state = Arc::new(Mutex::new(AppState::default()));
     let ui_weak = ui.as_weak();
+
+    // Setup progress polling timer - MUST keep timer alive by storing it
+    let progress_timer = Timer::default();
+    {
+        let state_clone = Arc::clone(&state);
+        let ui_weak_clone = ui_weak.clone();
+        progress_timer.start(TimerMode::Repeated, std::time::Duration::from_millis(100), move || {
+            if let Ok(state_guard) = state_clone.lock() {
+                if let Some(progress_bar) = &state_guard.progress_bar {
+                    let pos = progress_bar.position();
+                    let len = progress_bar.length().unwrap_or(0);
+
+                    if let Some(ui) = ui_weak_clone.upgrade() {
+                        // Update files found counter
+                        ui.set_files_found(len as i32);
+
+                        // Update progress phase (0.0 to 1.0)
+                        if len > 0 {
+                            let phase = pos as f32 / len as f32;
+                            ui.set_progress_phase(phase);
+                        }
+
+                        // Update status text with progress
+                        if len > 0 {
+                            ui.set_status_text(format!("Scanning: {} of {} files processed", pos, len).into());
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     {
         let state = Arc::clone(&state);
@@ -92,14 +199,21 @@ fn main() -> Result<(), slint::PlatformError> {
 
     {
         let ui_weak = ui_weak.clone();
+        let settings_clone = Arc::clone(&settings);
         ui.on_browse_root(move || {
             if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                 if let Some(ui) = ui_weak.upgrade() {
                     let root = folder.to_string_lossy().to_string();
-                    ui.set_root_path(root.into());
+                    ui.set_root_path(root.clone().into());
                     if ui.get_target_path().is_empty() {
                         let target = folder.join("duplicates");
                         ui.set_target_path(target.to_string_lossy().to_string().into());
+                    }
+
+                    // Save to settings
+                    if let Ok(mut settings_mut) = settings_clone.lock() {
+                        settings_mut.last_root_path = Some(root);
+                        save_settings(&settings_mut);
                     }
                 }
             }
@@ -108,11 +222,18 @@ fn main() -> Result<(), slint::PlatformError> {
 
     {
         let ui_weak = ui_weak.clone();
+        let settings_clone = Arc::clone(&settings);
         ui.on_browse_target(move || {
             if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                 if let Some(ui) = ui_weak.upgrade() {
                     let target = folder.to_string_lossy().to_string();
-                    ui.set_target_path(target.into());
+                    ui.set_target_path(target.clone().into());
+
+                    // Save to settings
+                    if let Ok(mut settings_mut) = settings_clone.lock() {
+                        settings_mut.last_target_path = Some(target);
+                        save_settings(&settings_mut);
+                    }
                 }
             }
         });
@@ -183,6 +304,230 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // Gallery filter changed callback
+    {
+        let state = Arc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_gallery_filter_changed(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                if let Ok(mut state_mut) = state.lock() {
+                    let filtered = apply_gallery_filters(
+                        &state_mut.all_photos,
+                        ui.get_filter_show_landscape(),
+                        ui.get_filter_show_portrait(),
+                        ui.get_filter_show_square(),
+                        ui.get_filter_show_high_res(),
+                        ui.get_filter_show_mobile_res(),
+                        ui.get_filter_show_low_res(),
+                        ui.get_filter_show_safe(),
+                        ui.get_filter_show_sensitive(),
+                        ui.get_filter_show_mature(),
+                        ui.get_filter_show_restricted(),
+                        &ui.get_filter_tag_search().to_string(),
+                    );
+                    state_mut.gallery_photos = filtered;
+                    let snapshot = state_mut.clone();
+                    drop(state_mut);
+                    refresh_ui(&ui, &snapshot, None);
+                }
+            }
+        });
+    }
+
+    // Select all best in duplicates
+    {
+        let state = Arc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_select_all_best(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                if let Ok(mut state_mut) = state.lock() {
+                    ensure_largest_selected(&mut state_mut.groups);
+                    let snapshot = state_mut.clone();
+                    drop(state_mut);
+                    refresh_ui(&ui, &snapshot, None);
+                }
+            }
+        });
+    }
+
+    // Select best in specific group
+    {
+        let state = Arc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_select_best_in_group(move |group_idx| {
+            if let Some(ui) = ui_weak.upgrade() {
+                if let Ok(mut state_mut) = state.lock() {
+                    if let Some(group) = state_mut.groups.get_mut(group_idx as usize) {
+                        if !group.files.is_empty() {
+                            let keep_index = find_keep_index(&group.files);
+                            for (index, file) in group.files.iter_mut().enumerate() {
+                                file.selected = index != keep_index;
+                                file.is_keep_candidate = index == keep_index;
+                            }
+                            group.reclaimable_bytes = group.files.iter()
+                                .filter(|f| f.selected)
+                                .map(|f| f.size_bytes)
+                                .sum();
+                        }
+                    }
+                    let snapshot = state_mut.clone();
+                    drop(state_mut);
+                    refresh_ui(&ui, &snapshot, None);
+                }
+            }
+        });
+    }
+
+    // Archive selected files (uses archive_path from state or settings)
+    {
+        let state = Arc::clone(&state);
+        let ui_weak = ui_weak.clone();
+        ui.on_archive_selected(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let archive_path = state.lock()
+                    .map(|s| s.archive_path.clone())
+                    .unwrap_or_else(|_| PathBuf::from("archive"));
+
+                let selected: Vec<PathBuf> = state
+                    .lock()
+                    .map(|state| {
+                        state.groups.iter()
+                            .flat_map(|group| &group.files)
+                            .filter(|file| file.selected)
+                            .map(|file| file.path.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                if selected.is_empty() {
+                    ui.set_status_text("No files selected to archive.".into());
+                    return;
+                }
+
+                ui.set_status_text(format!("Archiving {} files…", selected.len()).into());
+                let ui_weak = ui_weak.clone();
+                let state = Arc::clone(&state);
+
+                std::thread::spawn(move || perform_move(selected, archive_path, state, ui_weak));
+            }
+        });
+    }
+
+    // Settings callbacks
+    {
+        let ui_weak = ui_weak.clone();
+        ui.on_browse_archive_path(move || {
+            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                if let Some(ui) = ui_weak.upgrade() {
+                    let path = folder.to_string_lossy().to_string();
+                    ui.set_settings_archive_path(path.into());
+                }
+            }
+        });
+    }
+
+    {
+        let ui_weak = ui_weak.clone();
+        ui.on_browse_cache_path(move || {
+            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                if let Some(ui) = ui_weak.upgrade() {
+                    let path = folder.to_string_lossy().to_string();
+                    ui.set_settings_cache_path(path.into());
+                }
+            }
+        });
+    }
+
+    {
+        let ui_weak = ui_weak.clone();
+        ui.on_clear_cache(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let cache_path = ui.get_settings_cache_path().to_string();
+                if !cache_path.is_empty() {
+                    match fs::remove_dir_all(&cache_path) {
+                        Ok(_) => {
+                            ui.set_status_text(format!("Cache cleared: {}", cache_path).into());
+                            ui.set_settings_cached_thumbnails(0);
+                            ui.set_settings_cache_size_mb(0.0);
+                        }
+                        Err(e) => {
+                            ui.set_status_text(format!("Failed to clear cache: {}", e).into());
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Gallery action callbacks (stubs for now)
+    {
+        ui.on_gallery_photo_clicked(|_idx| {
+            // TODO: Implement photo preview modal
+        });
+
+        ui.on_gallery_photo_toggle_selected(|_idx| {
+            // TODO: Toggle photo selection in gallery
+        });
+
+        ui.on_gallery_export_selected(|| {
+            // TODO: Export selected photos
+        });
+
+        ui.on_gallery_archive_selected(|| {
+            // TODO: Archive selected photos from gallery
+        });
+
+        ui.on_gallery_select_all(|| {
+            // TODO: Select all filtered photos
+        });
+
+        ui.on_gallery_deselect_all(|| {
+            // TODO: Deselect all photos
+        });
+
+        let ui_weak_clone = ui_weak.clone();
+        let settings_clone = Arc::clone(&settings);
+        ui.on_save_settings(move || {
+            if let Some(ui) = ui_weak_clone.upgrade() {
+                if let Ok(mut settings_mut) = settings_clone.lock() {
+                    settings_mut.dark_mode = ui.get_dark_mode();
+                    settings_mut.show_tags = ui.get_settings_show_tags();
+                    settings_mut.compact_cards = ui.get_settings_compact_cards();
+                    let archive = ui.get_settings_archive_path().to_string();
+                    if !archive.is_empty() {
+                        settings_mut.archive_path = Some(archive);
+                    }
+                    let cache = ui.get_settings_cache_path().to_string();
+                    if !cache.is_empty() {
+                        settings_mut.cache_path = Some(cache);
+                    }
+                    save_settings(&settings_mut);
+                    ui.set_status_text("Settings saved.".into());
+                }
+            }
+        });
+
+        let ui_weak_clone = ui_weak.clone();
+        let settings_clone = Arc::clone(&settings);
+        ui.on_reset_defaults(move || {
+            if let Some(ui) = ui_weak_clone.upgrade() {
+                let defaults = AppSettings::default();
+                ui.set_dark_mode(defaults.dark_mode);
+                ui.set_settings_show_tags(defaults.show_tags);
+                ui.set_settings_compact_cards(defaults.compact_cards);
+                if let Ok(mut settings_mut) = settings_clone.lock() {
+                    *settings_mut = defaults;
+                    save_settings(&settings_mut);
+                }
+                ui.set_status_text("Settings reset to defaults.".into());
+            }
+        });
+
+        ui.on_archive_others_in_group(|_idx| {
+            // TODO: Archive all files in group except keep candidate
+        });
+    }
+
     ui.run()
 }
 
@@ -194,7 +539,24 @@ fn perform_scan(
 ) {
     let start_time = Instant::now();
     let classification_enabled = config.enable_classification;
-    let progress_bar = Arc::new(ProgressBar::hidden());
+
+    // Count total entries to set progress bar length
+    let total_entries = camden_core::count_entries(&root);
+
+    // Create a progress bar that the UI can poll
+    let progress_bar = Arc::new(ProgressBar::new(total_entries));
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("{msg} [{bar:40}] {pos}/{len}")
+            .unwrap()
+    );
+    progress_bar.set_message("Scanning");
+
+    // Store progress bar in state so UI can poll it
+    if let Ok(mut state_mut) = state.lock() {
+        state_mut.progress_bar = Some(Arc::clone(&progress_bar));
+    }
+
     let summary = scan(&root, &config, &progress_bar);
     let groups = map_summary(&summary);
     let duration = start_time.elapsed();
@@ -206,10 +568,19 @@ fn perform_scan(
         }
     }
 
+    // Collect all photos for gallery (flatten all groups)
+    let all_photos: Vec<InternalFile> = groups
+        .iter()
+        .flat_map(|g| g.files.clone())
+        .collect();
+
     if let Ok(mut state_mut) = state.lock() {
         state_mut.groups = groups;
+        state_mut.all_photos = all_photos.clone();
+        state_mut.gallery_photos = all_photos; // Initially show all photos
         state_mut.scanning = false;
         state_mut.last_scan_duration = Some(duration);
+        state_mut.progress_bar = None; // Clear progress bar
     }
 
     let duplicate_count = summary.duplicate_groups().count();
@@ -314,8 +685,25 @@ fn perform_move(
 }
 
 fn refresh_ui(ui: &MainWindow, state: &AppState, status_override: Option<String>) {
-    let model = build_group_model(&state.groups);
-    ui.set_groups(model);
+    // Legacy compatibility - set old groups property
+    let legacy_model = build_group_model(&state.groups);
+    ui.set_groups(legacy_model);
+
+    // New UI - set duplicate_groups and stats
+    let duplicate_groups_model = build_duplicate_groups_model(&state.groups);
+    ui.set_duplicate_groups(duplicate_groups_model);
+
+    let duplicate_stats = calculate_duplicate_stats(&state.groups);
+    ui.set_duplicate_stats(duplicate_stats);
+
+    // Set gallery photos (filtered view)
+    let gallery_model = build_gallery_photos_model(&state.gallery_photos);
+    ui.set_gallery_photos(gallery_model);
+
+    // Calculate and set gallery stats
+    let gallery_stats = calculate_gallery_stats(&state.all_photos, &state.gallery_photos);
+    ui.set_gallery_stats(gallery_stats);
+
     ui.set_scanning(state.scanning);
     if !state.scanning {
         ui.set_progress_phase(0.0);
@@ -341,11 +729,7 @@ fn build_group_model(groups: &[InternalGroup]) -> ModelRc<GroupData> {
                         .as_ref()
                         .and_then(|path| load_thumbnail(path))
                         .unwrap_or_default(),
-                    resolution_tier: match file.resolution_tier {
-                        ResolutionTier::High => 0,
-                        ResolutionTier::Mobile => 1,
-                        ResolutionTier::Low => 2,
-                    },
+                    resolution_tier: resolution_tier_to_int(file.resolution_tier),
                     moderation_tier: SharedString::from(file.moderation_tier.clone()),
                     tags: SharedString::from(file.tags.clone()),
                 })
@@ -378,6 +762,8 @@ fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {
                         .to_string();
                     let info = format_file_info(file);
                     let sort_date = file.captured_at.clone().or_else(|| file.modified.clone());
+                    let dimensions = (file.dimensions.0 as u32, file.dimensions.1 as u32);
+                    let orientation = classify_orientation(dimensions.0, dimensions.1);
 
                     InternalFile {
                         path: file.path.clone(),
@@ -390,6 +776,9 @@ fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {
                         resolution_tier: file.resolution_tier,
                         moderation_tier: file.moderation_tier.clone().unwrap_or_default(),
                         tags: file.tags.join(", "),
+                        dimensions,
+                        orientation,
+                        is_keep_candidate: false,
                     }
                 })
                 .collect();
@@ -400,12 +789,25 @@ fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {
                 let keep_index = find_keep_index(&files);
                 for (index, file) in files.iter_mut().enumerate() {
                     file.selected = index != keep_index;
+                    file.is_keep_candidate = index == keep_index;
                 }
             } else if files.len() == 1 && files[0].resolution_tier.should_preselect() {
                 files[0].selected = true;
             }
 
-            InternalGroup { fingerprint, files }
+            // Calculate group totals
+            let total_size_bytes: u64 = files.iter().map(|f| f.size_bytes).sum();
+            let reclaimable_bytes: u64 = files.iter()
+                .filter(|f| f.selected)
+                .map(|f| f.size_bytes)
+                .sum();
+
+            InternalGroup {
+                fingerprint,
+                files,
+                total_size_bytes,
+                reclaimable_bytes,
+            }
         })
         .collect()
 }
@@ -449,6 +851,9 @@ mod tests {
             resolution_tier: ResolutionTier::High,
             moderation_tier: String::new(),
             tags: String::new(),
+            dimensions: (1920, 1080),
+            orientation: 0,
+            is_keep_candidate: false,
         }
     }
 
@@ -534,7 +939,15 @@ fn ensure_largest_selected(groups: &mut [InternalGroup]) {
         let keep_index = find_keep_index(&group.files);
         for (index, file) in group.files.iter_mut().enumerate() {
             file.selected = index != keep_index;
+            file.is_keep_candidate = index == keep_index;
         }
+
+        // Recalculate group totals
+        group.total_size_bytes = group.files.iter().map(|f| f.size_bytes).sum();
+        group.reclaimable_bytes = group.files.iter()
+            .filter(|f| f.selected)
+            .map(|f| f.size_bytes)
+            .sum();
     }
 }
 
@@ -566,6 +979,175 @@ fn format_size(bytes: u64) -> String {
     } else {
         format!("{:.1} {}", size, UNITS[unit])
     }
+}
+
+fn classify_orientation(width: u32, height: u32) -> i32 {
+    if width > height {
+        0 // Landscape
+    } else if height > width {
+        1 // Portrait
+    } else {
+        2 // Square
+    }
+}
+
+fn resolution_tier_to_int(tier: ResolutionTier) -> i32 {
+    match tier {
+        ResolutionTier::High => 0,
+        ResolutionTier::Mobile => 1,
+        ResolutionTier::Low => 2,
+    }
+}
+
+// Convert InternalFile to PhotoData for new UI
+fn file_to_photo_data(file: &InternalFile, id: i32, group_id: i32) -> PhotoData {
+    PhotoData {
+        id,
+        display_name: SharedString::from(file.display_name.clone()),
+        info: SharedString::from(file.info.clone()),
+        thumbnail: file
+            .thumbnail
+            .as_ref()
+            .and_then(|path| load_thumbnail(path))
+            .unwrap_or_default(),
+        selected: file.selected,
+        resolution_tier: resolution_tier_to_int(file.resolution_tier),
+        orientation: file.orientation,
+        moderation_tier: SharedString::from(file.moderation_tier.clone()),
+        tags: SharedString::from(file.tags.clone()),
+        is_keep_candidate: file.is_keep_candidate,
+        group_id,
+    }
+}
+
+// Build DuplicateGroup models for new UI
+fn build_duplicate_groups_model(groups: &[InternalGroup]) -> ModelRc<DuplicateGroup> {
+    let mut photo_id = 0i32;
+    let duplicate_groups: Vec<DuplicateGroup> = groups
+        .iter()
+        .enumerate()
+        .map(|(group_idx, group)| {
+            let files: Vec<PhotoData> = group
+                .files
+                .iter()
+                .map(|file| {
+                    let photo = file_to_photo_data(file, photo_id, group_idx as i32);
+                    photo_id += 1;
+                    photo
+                })
+                .collect();
+
+            DuplicateGroup {
+                fingerprint: SharedString::from(group.fingerprint.clone()),
+                files: ModelRc::from(Rc::new(VecModel::from(files))),
+                total_size_bytes: group.total_size_bytes as i32,
+                reclaimable_bytes: group.reclaimable_bytes as i32,
+            }
+        })
+        .collect();
+
+    ModelRc::from(Rc::new(VecModel::from(duplicate_groups)))
+}
+
+// Calculate DuplicateStats from groups
+fn calculate_duplicate_stats(groups: &[InternalGroup]) -> DuplicateStats {
+    let total_groups = groups.len() as i32;
+    let total_files: i32 = groups.iter().map(|g| g.files.len() as i32).sum();
+    let total_duplicates = groups.iter()
+        .filter(|g| g.files.len() > 1)
+        .map(|g| (g.files.len() - 1) as i32)
+        .sum();
+    let reclaimable_bytes: u64 = groups.iter().map(|g| g.reclaimable_bytes).sum();
+    let reclaimable_mb = (reclaimable_bytes as f64) / (1024.0 * 1024.0);
+    let selected_count: i32 = groups.iter()
+        .flat_map(|g| &g.files)
+        .filter(|f| f.selected)
+        .count() as i32;
+
+    DuplicateStats {
+        total_groups,
+        total_files,
+        total_duplicates,
+        reclaimable_mb: reclaimable_mb as f32,
+        selected_count,
+    }
+}
+
+// Build gallery photos model
+fn build_gallery_photos_model(photos: &[InternalFile]) -> ModelRc<PhotoData> {
+    let photo_data: Vec<PhotoData> = photos
+        .iter()
+        .enumerate()
+        .map(|(idx, file)| file_to_photo_data(file, idx as i32, -1))
+        .collect();
+
+    ModelRc::from(Rc::new(VecModel::from(photo_data)))
+}
+
+// Calculate GalleryStats
+fn calculate_gallery_stats(all_photos: &[InternalFile], filtered_photos: &[InternalFile]) -> GalleryStats {
+    let total_photos = all_photos.len() as i32;
+    let filtered_photos_count = filtered_photos.len() as i32;
+    let selected_count = filtered_photos.iter().filter(|f| f.selected).count() as i32;
+
+    let landscape_count = all_photos.iter().filter(|f| f.orientation == 0).count() as i32;
+    let portrait_count = all_photos.iter().filter(|f| f.orientation == 1).count() as i32;
+    let square_count = all_photos.iter().filter(|f| f.orientation == 2).count() as i32;
+
+    GalleryStats {
+        total_photos,
+        filtered_photos: filtered_photos_count,
+        selected_count,
+        landscape_count,
+        portrait_count,
+        square_count,
+    }
+}
+
+// Apply gallery filters
+fn apply_gallery_filters(
+    photos: &[InternalFile],
+    show_landscape: bool,
+    show_portrait: bool,
+    show_square: bool,
+    show_high_res: bool,
+    show_mobile_res: bool,
+    show_low_res: bool,
+    show_safe: bool,
+    show_sensitive: bool,
+    show_mature: bool,
+    show_restricted: bool,
+    tag_search: &str,
+) -> Vec<InternalFile> {
+    photos
+        .iter()
+        .filter(|p| match p.orientation {
+            0 => show_landscape,
+            1 => show_portrait,
+            2 => show_square,
+            _ => true,
+        })
+        .filter(|p| match p.resolution_tier {
+            ResolutionTier::High => show_high_res,
+            ResolutionTier::Mobile => show_mobile_res,
+            ResolutionTier::Low => show_low_res,
+        })
+        .filter(|p| {
+            let tier = p.moderation_tier.as_str();
+            match tier {
+                "" | "Safe" => show_safe,
+                "Sensitive" => show_sensitive,
+                "Mature" => show_mature,
+                "Restricted" => show_restricted,
+                _ => true,
+            }
+        })
+        .filter(|p| {
+            tag_search.is_empty()
+                || p.tags.to_lowercase().contains(&tag_search.to_lowercase())
+        })
+        .cloned()
+        .collect()
 }
 
 fn format_status(state: &AppState) -> String {

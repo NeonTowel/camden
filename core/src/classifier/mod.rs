@@ -38,9 +38,9 @@ mod runtime;
 mod tagging;
 
 pub use config::{ClassifierConfig, ModelConfig, ModelInputSpec, ModelOutputSpec, ModelPreset, ModelType};
-pub use moderation::{ModerationCategories, ModerationConfig, ModerationFlags, ModerationModelFormat, ModerationTier, NsfwClassifier};
+pub use moderation::{AggregationStrategy, EnsembleModerationClassifier, ModerationCategories, ModerationConfig, ModerationFlags, ModerationModelFormat, ModerationTier, NsfwClassifier};
 pub use runtime::{ClassifierError, ModelPaths};
-pub use tagging::{ImageTag, TagCategory, TaggingClassifier, TaggingConfig};
+pub use tagging::{EnsembleTaggingClassifier, ImageTag, TagCategory, TaggingClassifier, TaggingConfig};
 
 use csv::ReaderBuilder;
 use std::fs;
@@ -112,18 +112,30 @@ pub fn default_ort_dylib_path() -> std::path::PathBuf {
     }
 }
 
+/// Moderation classifier variant (single or ensemble).
+enum ModerationClassifierVariant {
+    Single(NsfwClassifier),
+    Ensemble(EnsembleModerationClassifier),
+}
+
+/// Tagging classifier variant (single or ensemble).
+enum TaggingClassifierVariant {
+    Single(TaggingClassifier),
+    Ensemble(EnsembleTaggingClassifier),
+}
+
 /// Combined classifier that runs both moderation and tagging models.
 pub struct ImageClassifier {
-    moderation: NsfwClassifier,
-    tagging: TaggingClassifier,
+    moderation: ModerationClassifierVariant,
+    tagging: TaggingClassifierVariant,
     config: ClassifierConfig,
 }
 
 impl ImageClassifier {
     /// Create a new classifier with models from the specified paths.
     pub fn new(paths: &ModelPaths) -> Result<Self, ClassifierError> {
-        let moderation = NsfwClassifier::new(&paths.nsfw_model)?;
-        let tagging = TaggingClassifier::new(&paths.tagging_model)?;
+        let moderation = ModerationClassifierVariant::Single(NsfwClassifier::new(&paths.nsfw_model)?);
+        let tagging = TaggingClassifierVariant::Single(TaggingClassifier::new(&paths.tagging_model)?);
         Ok(Self {
             moderation,
             tagging,
@@ -140,37 +152,105 @@ impl ImageClassifier {
     /// Create a classifier from a configuration.
     pub fn from_config(config: ClassifierConfig) -> Result<Self, ClassifierError> {
         let models_dir = config.models_dir.clone();
-        let moderation_path = config.active_moderation_path().ok_or_else(|| {
-            ClassifierError::Processing("no active moderation model configured".to_string())
-        })?;
-        let tagging_path = config.active_tagging_path().ok_or_else(|| {
-            ClassifierError::Processing("no active tagging model configured".to_string())
-        })?;
-        
-        // Get model-specific configuration for moderation
-        let moderation = if let Some(model_config) = config.active_moderation_model() {
-            let mod_config = ModerationConfig::from_specs(
-                &model_config.input,
-                &model_config.output.labels,
-                model_config.output.format.as_deref(),
-            );
-            NsfwClassifier::with_config(&moderation_path, mod_config)?
+
+        // Check if ensemble mode is enabled
+        let moderation = if config.is_ensemble_mode() {
+            // Ensemble mode: load multiple models
+            let model_configs: Vec<_> = config.active_moderation_models()
+                .iter()
+                .filter_map(|model_config| {
+                    let path = if model_config.path.is_absolute() {
+                        model_config.path.clone()
+                    } else {
+                        models_dir.join(&model_config.path)
+                    };
+                    let mod_config = ModerationConfig::from_specs(
+                        &model_config.input,
+                        &model_config.output.labels,
+                        model_config.output.format.as_deref(),
+                    );
+                    Some((path, mod_config))
+                })
+                .collect();
+
+            if model_configs.is_empty() {
+                return Err(ClassifierError::Processing(
+                    "no valid moderation models configured for ensemble".to_string()
+                ));
+            }
+
+            ModerationClassifierVariant::Ensemble(
+                EnsembleModerationClassifier::with_configs(model_configs)?
+            )
         } else {
-            NsfwClassifier::new(&moderation_path)?
+            // Single model mode
+            let moderation_path = config.active_moderation_path().ok_or_else(|| {
+                ClassifierError::Processing("no active moderation model configured".to_string())
+            })?;
+
+            let single_classifier = if let Some(model_config) = config.active_moderation_model() {
+                let mod_config = ModerationConfig::from_specs(
+                    &model_config.input,
+                    &model_config.output.labels,
+                    model_config.output.format.as_deref(),
+                );
+                NsfwClassifier::with_config(&moderation_path, mod_config)?
+            } else {
+                NsfwClassifier::new(&moderation_path)?
+            };
+
+            ModerationClassifierVariant::Single(single_classifier)
         };
-        
-        // Get model-specific configuration for tagging
-        let tagging = if let Some(model_config) = config.active_tagging_model() {
-            let tag_config = TaggingConfig::from_specs_with_output(
-                &model_config.input,
-                model_config.output.multi_label,
-            );
-            let labels = load_tagging_labels(&models_dir, &model_config.output)?;
-            TaggingClassifier::with_config_and_labels(&tagging_path, tag_config, labels)?
+
+        // Check if tagging ensemble mode is enabled
+        let tagging = if config.is_tagging_ensemble_mode() {
+            // Tagging ensemble mode: load multiple models
+            let model_configs: Vec<_> = config.active_tagging_models()
+                .iter()
+                .filter_map(|model_config| {
+                    let path = if model_config.path.is_absolute() {
+                        model_config.path.clone()
+                    } else {
+                        models_dir.join(&model_config.path)
+                    };
+                    let tag_config = TaggingConfig::from_specs_with_output(
+                        &model_config.input,
+                        model_config.output.multi_label,
+                    );
+                    let labels = load_tagging_labels(&models_dir, &model_config.output).ok()?;
+                    Some((path, tag_config, labels))
+                })
+                .collect();
+
+            if model_configs.is_empty() {
+                return Err(ClassifierError::Processing(
+                    "no valid tagging models configured for ensemble".to_string()
+                ));
+            }
+
+            TaggingClassifierVariant::Ensemble(
+                EnsembleTaggingClassifier::with_configs(model_configs)?
+            )
         } else {
-            TaggingClassifier::new(&tagging_path)?
+            // Single tagging model mode
+            let tagging_path = config.active_tagging_path().ok_or_else(|| {
+                ClassifierError::Processing("no active tagging model configured".to_string())
+            })?;
+
+            let single_classifier = if let Some(model_config) = config.active_tagging_model() {
+                let tag_config = TaggingConfig::from_specs_with_output(
+                    &model_config.input,
+                    model_config.output.multi_label,
+                );
+                let labels = load_tagging_labels(&models_dir, &model_config.output)?;
+                TaggingClassifier::with_config_and_labels(&tagging_path, tag_config, labels)?
+            } else {
+                TaggingClassifier::new(&tagging_path)?
+            };
+
+            TaggingClassifierVariant::Single(single_classifier)
         };
-        
+
         Ok(Self {
             moderation,
             tagging,
@@ -191,18 +271,30 @@ impl ImageClassifier {
 
     /// Analyze an image for moderation flags only.
     pub fn moderate(&mut self, image_path: &Path) -> Result<ModerationFlags, ClassifierError> {
-        self.moderation.classify(image_path)
+        match &mut self.moderation {
+            ModerationClassifierVariant::Single(classifier) => classifier.classify(image_path),
+            ModerationClassifierVariant::Ensemble(classifier) => classifier.classify(image_path),
+        }
     }
 
     /// Generate tags for an image.
     pub fn tag(&mut self, image_path: &Path, max_tags: usize) -> Result<Vec<ImageTag>, ClassifierError> {
-        self.tagging.classify(image_path, max_tags)
+        match &mut self.tagging {
+            TaggingClassifierVariant::Single(classifier) => classifier.classify(image_path, max_tags),
+            TaggingClassifierVariant::Ensemble(classifier) => classifier.classify(image_path, max_tags),
+        }
     }
 
     /// Run full classification (moderation + tagging).
     pub fn classify(&mut self, image_path: &Path) -> Result<ClassificationResult, ClassifierError> {
-        let moderation = self.moderation.classify(image_path)?;
-        let tags = self.tagging.classify(image_path, 10)?;
+        let moderation = match &mut self.moderation {
+            ModerationClassifierVariant::Single(classifier) => classifier.classify(image_path)?,
+            ModerationClassifierVariant::Ensemble(classifier) => classifier.classify(image_path)?,
+        };
+        let tags = match &mut self.tagging {
+            TaggingClassifierVariant::Single(classifier) => classifier.classify(image_path, 10)?,
+            TaggingClassifierVariant::Ensemble(classifier) => classifier.classify(image_path, 10)?,
+        };
         Ok(ClassificationResult { moderation, tags })
     }
 }

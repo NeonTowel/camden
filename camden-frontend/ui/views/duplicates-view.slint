@@ -53,31 +53,37 @@ component DuplicateGroupCard inherits Rectangle {
 
             Rectangle {
                 height: 20px;
-                padding-left: 8px;
-                padding-right: 8px;
                 border-radius: 4px;
                 background: Theme.colors.bg_secondary;
 
-                Text {
-                    text: group.files.length + " files";
-                    font-size: 9pt;
-                    color: Theme.colors.text_secondary;
-                    vertical-alignment: center;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+
+                    Text {
+                        text: group.files.length + " files";
+                        font-size: 9pt;
+                        color: Theme.colors.text_secondary;
+                        vertical-alignment: center;
+                    }
                 }
             }
 
             if group.reclaimable_bytes > 0 : Rectangle {
                 height: 20px;
-                padding-left: 8px;
-                padding-right: 8px;
                 border-radius: 4px;
                 background: Theme.colors.accent_warning.with_alpha(0.15);
 
-                Text {
-                    text: format-size(group.reclaimable_bytes) + " reclaimable";
-                    font-size: 9pt;
-                    color: Theme.colors.accent_warning;
-                    vertical-alignment: center;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+
+                    Text {
+                        text: format-size(group.reclaimable_bytes) + " reclaimable";
+                        font-size: 9pt;
+                        color: Theme.colors.accent_warning;
+                        vertical-alignment: center;
+                    }
                 }
             }
 
@@ -331,16 +337,19 @@ export component DuplicatesView inherits Rectangle {
 
                     Rectangle {
                         height: 24px;
-                        padding-left: 8px;
-                        padding-right: 8px;
                         border-radius: 4px;
                         background: Theme.colors.accent_primary.with_alpha(0.15);
 
-                        Text {
-                            text: groups.length + " groups, " + stats.total_files + " files";
-                            font-size: 10pt;
-                            color: Theme.colors.accent_primary;
-                            vertical-alignment: center;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+
+                            Text {
+                                text: groups.length + " groups, " + stats.total_files + " files";
+                                font-size: 10pt;
+                                color: Theme.colors.accent_primary;
+                                vertical-alignment: center;
+                            }
                         }
                     }
 

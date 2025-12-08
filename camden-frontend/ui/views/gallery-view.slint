@@ -93,16 +93,19 @@ export component GalleryView inherits Rectangle {
                     // Count badge
                     Rectangle {
                         height: 24px;
-                        padding-left: 8px;
-                        padding-right: 8px;
                         border-radius: 4px;
                         background: Theme.colors.accent_primary.with_alpha(0.15);
 
-                        Text {
-                            text: stats.filtered_photos + " of " + stats.total_photos + " photos";
-                            font-size: 10pt;
-                            color: Theme.colors.accent_primary;
-                            vertical-alignment: center;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+
+                            Text {
+                                text: stats.filtered_photos + " of " + stats.total_photos + " photos";
+                                font-size: 10pt;
+                                color: Theme.colors.accent_primary;
+                                vertical-alignment: center;
+                            }
                         }
                     }
 
@@ -323,6 +326,7 @@ export component GalleryView inherits Rectangle {
                             for col in [0, 1, 2, 3] : Rectangle {
                                 visible: (row-start + col) < photos.length;
                                 width: self.visible ? 160px : 0px;
+                                height: 220px;  // Match PhotoCard's natural height
 
                                 if (row-start + col) < photos.length : PhotoCard {
                                     photo: photos[row-start + col];

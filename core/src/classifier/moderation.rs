@@ -460,6 +460,131 @@ pub struct ModerationFlags {
     pub categories: ModerationCategories,
 }
 
+/// Ensemble classifier that runs multiple moderation models and aggregates results.
+pub struct EnsembleModerationClassifier {
+    classifiers: Vec<NsfwClassifier>,
+    aggregation: AggregationStrategy,
+}
+
+/// Strategy for aggregating results from multiple models.
+#[derive(Clone, Copy, Debug)]
+pub enum AggregationStrategy {
+    /// Average probability scores across all models
+    Average,
+    /// Use the maximum (most conservative) tier across all models
+    MaxTier,
+    /// Use weighted average with configurable weights per model
+    Weighted,
+}
+
+impl Default for AggregationStrategy {
+    fn default() -> Self {
+        Self::Average
+    }
+}
+
+impl EnsembleModerationClassifier {
+    /// Create a new ensemble classifier from multiple model paths.
+    pub fn new(model_paths: &[impl AsRef<Path>]) -> Result<Self, ClassifierError> {
+        let mut classifiers = Vec::new();
+        for path in model_paths {
+            classifiers.push(NsfwClassifier::new(path.as_ref())?);
+        }
+        Ok(Self {
+            classifiers,
+            aggregation: AggregationStrategy::default(),
+        })
+    }
+
+    /// Create ensemble with custom configurations for each model.
+    pub fn with_configs(configs: Vec<(impl AsRef<Path>, ModerationConfig)>) -> Result<Self, ClassifierError> {
+        let mut classifiers = Vec::new();
+        for (path, config) in configs {
+            classifiers.push(NsfwClassifier::with_config(path.as_ref(), config)?);
+        }
+        Ok(Self {
+            classifiers,
+            aggregation: AggregationStrategy::default(),
+        })
+    }
+
+    /// Set the aggregation strategy.
+    pub fn with_strategy(mut self, strategy: AggregationStrategy) -> Self {
+        self.aggregation = strategy;
+        self
+    }
+
+    /// Classify an image using all models in the ensemble.
+    pub fn classify(&mut self, image_path: &Path) -> Result<ModerationFlags, ClassifierError> {
+        if self.classifiers.is_empty() {
+            return Err(ClassifierError::Processing(
+                "ensemble has no classifiers configured".to_string(),
+            ));
+        }
+
+        // Run all classifiers
+        let mut results = Vec::new();
+        for classifier in &mut self.classifiers {
+            results.push(classifier.classify(image_path)?);
+        }
+
+        // Aggregate results based on strategy
+        match self.aggregation {
+            AggregationStrategy::Average => self.aggregate_average(&results),
+            AggregationStrategy::MaxTier => self.aggregate_max_tier(&results),
+            AggregationStrategy::Weighted => self.aggregate_average(&results), // TODO: Add weights
+        }
+    }
+
+    /// Aggregate results by averaging category scores.
+    fn aggregate_average(&self, results: &[ModerationFlags]) -> Result<ModerationFlags, ClassifierError> {
+        let n = results.len() as f32;
+
+        // Average each category score
+        let avg_categories = ModerationCategories {
+            drawings: results.iter().map(|r| r.categories.drawings).sum::<f32>() / n,
+            hentai: results.iter().map(|r| r.categories.hentai).sum::<f32>() / n,
+            neutral: results.iter().map(|r| r.categories.neutral).sum::<f32>() / n,
+            porn: results.iter().map(|r| r.categories.porn).sum::<f32>() / n,
+            sexy: results.iter().map(|r| r.categories.sexy).sum::<f32>() / n,
+        };
+
+        let tier = avg_categories.determine_tier();
+        let safety_score = avg_categories.safety_score();
+
+        Ok(ModerationFlags {
+            tier,
+            safety_score,
+            categories: avg_categories,
+        })
+    }
+
+    /// Aggregate results by taking the maximum (most restrictive) tier.
+    fn aggregate_max_tier(&self, results: &[ModerationFlags]) -> Result<ModerationFlags, ClassifierError> {
+        // Find the result with the highest tier level
+        let max_result = results
+            .iter()
+            .max_by_key(|r| r.tier.level())
+            .ok_or_else(|| ClassifierError::Processing("no results to aggregate".to_string()))?;
+
+        // Also average the category scores for additional context
+        let n = results.len() as f32;
+        let avg_categories = ModerationCategories {
+            drawings: results.iter().map(|r| r.categories.drawings).sum::<f32>() / n,
+            hentai: results.iter().map(|r| r.categories.hentai).sum::<f32>() / n,
+            neutral: results.iter().map(|r| r.categories.neutral).sum::<f32>() / n,
+            porn: results.iter().map(|r| r.categories.porn).sum::<f32>() / n,
+            sexy: results.iter().map(|r| r.categories.sexy).sum::<f32>() / n,
+        };
+
+        Ok(ModerationFlags {
+            tier: max_result.tier,
+            safety_score: max_result.safety_score,
+            categories: avg_categories,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

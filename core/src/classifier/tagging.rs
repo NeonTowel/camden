@@ -618,3 +618,110 @@ const IMAGENET_LABELS: &[&str] = &[
     "stinkhorn mushroom", "earth star", "hen of the woods", "bolete", "ear",
     "toilet paper",
 ];
+
+/// Ensemble classifier that runs multiple tagging models and merges results.
+pub struct EnsembleTaggingClassifier {
+    classifiers: Vec<TaggingClassifier>,
+}
+
+impl EnsembleTaggingClassifier {
+    /// Create a new ensemble classifier from multiple model paths.
+    pub fn new(model_paths: &[impl AsRef<Path>]) -> Result<Self, ClassifierError> {
+        let mut classifiers = Vec::new();
+        for path in model_paths {
+            classifiers.push(TaggingClassifier::new(path.as_ref())?);
+        }
+        Ok(Self { classifiers })
+    }
+
+    /// Create ensemble with custom configurations for each model.
+    pub fn with_configs(
+        configs: Vec<(impl AsRef<Path>, TaggingConfig, Vec<String>)>,
+    ) -> Result<Self, ClassifierError> {
+        let mut classifiers = Vec::new();
+        for (path, config, labels) in configs {
+            classifiers.push(TaggingClassifier::with_config_and_labels(
+                path.as_ref(),
+                config,
+                labels,
+            )?);
+        }
+        Ok(Self { classifiers })
+    }
+
+    /// Classify an image using all models in the ensemble and merge tags.
+    ///
+    /// Merging strategy:
+    /// - Collect all tags from all models
+    /// - Group by tag name (normalized)
+    /// - Average confidence scores for duplicate tags
+    /// - Return top N tags by averaged confidence
+    pub fn classify(
+        &mut self,
+        image_path: &Path,
+        max_tags: usize,
+    ) -> Result<Vec<ImageTag>, ClassifierError> {
+        if self.classifiers.is_empty() {
+            return Err(ClassifierError::Processing(
+                "ensemble has no classifiers configured".to_string(),
+            ));
+        }
+
+        // Run all classifiers and collect their tags
+        let mut all_tags: Vec<ImageTag> = Vec::new();
+        for classifier in &mut self.classifiers {
+            // Each classifier returns up to max_tags * 2 to give more variety
+            let tags = classifier.classify(image_path, max_tags * 2)?;
+            all_tags.extend(tags);
+        }
+
+        // Merge tags by name (aggregate confidence scores)
+        let merged_tags = self.merge_tags(all_tags);
+
+        // Sort by confidence and take top max_tags
+        let mut sorted_tags = merged_tags;
+        sorted_tags.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+        sorted_tags.truncate(max_tags);
+
+        Ok(sorted_tags)
+    }
+
+    /// Merge tags with the same name by averaging their confidence scores.
+    fn merge_tags(&self, tags: Vec<ImageTag>) -> Vec<ImageTag> {
+        use std::collections::HashMap;
+
+        // Group tags by name
+        let mut tag_map: HashMap<String, Vec<f32>> = HashMap::new();
+        let mut tag_prototypes: HashMap<String, ImageTag> = HashMap::new();
+
+        for tag in tags {
+            tag_map
+                .entry(tag.name.clone())
+                .or_insert_with(Vec::new)
+                .push(tag.confidence);
+
+            // Keep first occurrence as prototype (for label, category)
+            tag_prototypes.entry(tag.name.clone()).or_insert(tag);
+        }
+
+        // Average confidence scores for each tag
+        tag_map
+            .into_iter()
+            .filter_map(|(name, confidences)| {
+                let avg_confidence = confidences.iter().sum::<f32>() / confidences.len() as f32;
+
+                // Only return tags that meet minimum confidence after averaging
+                if avg_confidence >= MIN_TAG_CONFIDENCE {
+                    tag_prototypes.get(&name).map(|prototype| ImageTag {
+                        name: prototype.name.clone(),
+                        label: prototype.label.clone(),
+                        confidence: avg_confidence,
+                        category: prototype.category,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+}
