@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use super::models;
 use super::runtime::ClassifierError;
 
 /// Default configuration file name.
@@ -41,10 +42,18 @@ pub struct ModelInputSpec {
     /// Optional custom normalization std for the model.
     #[serde(default)]
     pub std: Option<[f32; 3]>,
+    /// Whether to include batch dimension (default: true)
+    /// Set to false for models that expect rank-3 tensors (C,H,W or H,W,C)
+    #[serde(default = "default_batch_dim")]
+    pub batch_dim: bool,
 }
 
 fn default_layout() -> String {
     "NCHW".to_string()
+}
+
+fn default_batch_dim() -> bool {
+    true
 }
 
 impl Default for ModelInputSpec {
@@ -56,6 +65,7 @@ impl Default for ModelInputSpec {
             layout: default_layout(),
             mean: None,
             std: None,
+            batch_dim: true,
         }
     }
 }
@@ -223,14 +233,16 @@ fn default_ort_lib() -> PathBuf {
 
 impl Default for ClassifierConfig {
     fn default() -> Self {
-        let builtin_models = Self::builtin_model_registry();
+        let builtin_models = models::builtin_model_registry();
 
         Self {
             models_dir: default_models_dir(),
             ort_library: default_ort_lib(),
-            moderation_model: Some("gantman-nsfw".to_string()),
+            // Default single models (fast, lightweight)
+            moderation_model: Some("taufiqdp-mobilenetv4-nsfw".to_string()),
+            tagging_model: Some("smilingwolf-wd-v1-4-convnextv2-tagger-v2".to_string()),
+            // Ensemble mode disabled by default (set in config file to enable)
             moderation_models: Vec::new(),
-            tagging_model: Some("mobilenetv2".to_string()),
             tagging_models: Vec::new(),
             models: HashMap::new(),
             presets: Self::default_presets(),
@@ -240,446 +252,6 @@ impl Default for ClassifierConfig {
 }
 
 impl ClassifierConfig {
-    /// Create built-in model registry with all supported models.
-    fn builtin_model_registry() -> HashMap<String, ModelConfig> {
-        let mut models = HashMap::new();
-
-        // =========================================================================
-        // MODERATION MODELS
-        // =========================================================================
-
-        // GantMan NSFW (5-class) - Default
-        models.insert(
-            "gantman-nsfw".to_string(),
-            ModelConfig {
-                name: "GantMan NSFW".to_string(),
-                model_type: ModelType::Moderation,
-                path: PathBuf::from("nsfw-inception-v3.onnx"),
-                input: ModelInputSpec {
-                    width: 299,
-                    height: 299,
-                    normalize: false,
-                    layout: "NHWC".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 5,
-                    labels: vec![
-                        "drawings".to_string(),
-                        "hentai".to_string(),
-                        "neutral".to_string(),
-                        "porn".to_string(),
-                        "sexy".to_string(),
-                    ],
-                    labels_file: None,
-                    format: Some("gantman".to_string()),
-                    multi_label: false,
-                },
-                description: "5-class NSFW detection (drawings, hentai, neutral, porn, sexy)"
-                    .to_string(),
-                enabled: true,
-            },
-        );
-
-        // AdamCodd ViT NSFW
-        models.insert(
-            "adamcodd-vit-nsfw".to_string(),
-            ModelConfig {
-                name: "AdamCodd ViT NSFW".to_string(),
-                model_type: ModelType::Moderation,
-                path: PathBuf::from("adamcodd-vit-base-nsfw.onnx"),
-                input: ModelInputSpec {
-                    width: 384,
-                    height: 384,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 2,
-                    labels: vec!["nsfw".to_string(), "sfw".to_string()],
-                    labels_file: None,
-                    format: Some("nsfw_sfw".to_string()),
-                    multi_label: false,
-                },
-                description: "AdamCodd ViT NSFW detector (nsfw/sfw), 384x384".to_string(),
-                enabled: true,
-            },
-        );
-
-        // NOTE: Falconsai NSFW removed - no ONNX version available on HuggingFace
-        // (only PyTorch/Safetensors format)
-
-        // spiele NSFW (4-tier severity)
-        models.insert(
-            "spiele-nsfw".to_string(),
-            ModelConfig {
-                name: "spiele NSFW Detector".to_string(),
-                model_type: ModelType::Moderation,
-                path: PathBuf::from("spiele-nsfw.onnx"),
-                input: ModelInputSpec {
-                    width: 448,
-                    height: 448,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: Some([0.5, 0.5, 0.5]),
-                    std: Some([0.5, 0.5, 0.5]),
-                },
-                output: ModelOutputSpec {
-                    num_classes: 4,
-                    labels: vec![
-                        "neutral".to_string(),
-                        "sensitive".to_string(),
-                        "mature".to_string(),
-                        "nsfw-restricted".to_string(),
-                    ],
-                    labels_file: None,
-                    format: None,
-                    multi_label: false,
-                },
-                description: "spiele ViT-based NSFW severity detector (neutral → restricted)"
-                    .to_string(),
-                enabled: true,
-            },
-        );
-
-        // TaufiqDP MobileNetV4 NSFW
-        models.insert(
-            "taufiqdp-mobilenetv4".to_string(),
-            ModelConfig {
-                name: "TaufiqDP MobileNetV4 NSFW".to_string(),
-                model_type: ModelType::Moderation,
-                path: PathBuf::from(
-                    "taufiqdp-mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx",
-                ),
-                input: ModelInputSpec {
-                    width: 224,
-                    height: 224,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 5,
-                    labels: vec![
-                        "drawings".to_string(),
-                        "hentai".to_string(),
-                        "neutral".to_string(),
-                        "porn".to_string(),
-                        "sexy".to_string(),
-                    ],
-                    labels_file: None,
-                    format: Some("gantman".to_string()),
-                    multi_label: false,
-                },
-                description: "TaufiqDP MobileNetV4 NSFW (GantMan 5-class)".to_string(),
-                enabled: true,
-            },
-        );
-
-        // NSFWJS (deepghs conversion)
-        models.insert(
-            "nsfwjs".to_string(),
-            ModelConfig {
-                name: "NSFWJS".to_string(),
-                model_type: ModelType::Moderation,
-                path: PathBuf::from("nsfwjs.onnx"),
-                input: ModelInputSpec {
-                    width: 224,
-                    height: 224,
-                    normalize: false,
-                    layout: "NHWC".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 5,
-                    labels: vec![
-                        "drawings".to_string(),
-                        "hentai".to_string(),
-                        "neutral".to_string(),
-                        "porn".to_string(),
-                        "sexy".to_string(),
-                    ],
-                    labels_file: None,
-                    format: Some("gantman".to_string()),
-                    multi_label: false,
-                },
-                description: "NSFWJS model (GantMan 5-class), lightweight".to_string(),
-                enabled: true,
-            },
-        );
-
-        // ONNX Community NSFW (ViT-based)
-        models.insert(
-            "onnx-community-nsfw".to_string(),
-            ModelConfig {
-                name: "ONNX Community NSFW".to_string(),
-                model_type: ModelType::Moderation,
-                path: PathBuf::from("onnx-community-nsfw.onnx"),
-                input: ModelInputSpec {
-                    width: 224,
-                    height: 224,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 2,
-                    labels: vec!["nsfw".to_string(), "sfw".to_string()],
-                    labels_file: None,
-                    format: Some("nsfw_sfw".to_string()),
-                    multi_label: false,
-                },
-                description: "ONNX Community ViT NSFW detector (nsfw/sfw)".to_string(),
-                enabled: true,
-            },
-        );
-
-        // Vladmandic NudeNet (body part detection)
-        models.insert(
-            "vladmandic-nudenet".to_string(),
-            ModelConfig {
-                name: "Vladmandic NudeNet".to_string(),
-                model_type: ModelType::Moderation,
-                path: PathBuf::from("vladmandic-nudenet.onnx"),
-                input: ModelInputSpec {
-                    width: 320,
-                    height: 320,
-                    normalize: false,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 2,
-                    labels: vec!["safe".to_string(), "nsfw".to_string()],
-                    labels_file: None,
-                    format: Some("nsfw_sfw".to_string()),
-                    multi_label: false,
-                },
-                description: "Vladmandic NudeNet - body part detection (12MB)".to_string(),
-                enabled: true,
-            },
-        );
-
-
-        // =========================================================================
-        // TAGGING MODELS - ImageNet
-        // =========================================================================
-
-        // MobileNetV2 - Default
-        models.insert(
-            "mobilenetv2".to_string(),
-            ModelConfig {
-                name: "MobileNetV2".to_string(),
-                model_type: ModelType::Tagging,
-                path: PathBuf::from("mobilenetv2-12.onnx"),
-                input: ModelInputSpec {
-                    width: 224,
-                    height: 224,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 1000,
-                    labels: Vec::new(),
-                    labels_file: None,
-                    format: None,
-                    multi_label: false,
-                },
-                description: "ImageNet 1000-class classification, optimized for mobile".to_string(),
-                enabled: true,
-            },
-        );
-
-        // ConvNeXtV2 Large
-        models.insert(
-            "convnextv2-large".to_string(),
-            ModelConfig {
-                name: "ConvNeXtV2 Large".to_string(),
-                model_type: ModelType::Tagging,
-                path: PathBuf::from("convnextv2-large-1k-224.onnx"),
-                input: ModelInputSpec {
-                    width: 224,
-                    height: 224,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 1000,
-                    labels: Vec::new(),
-                    labels_file: None,
-                    format: None,
-                    multi_label: false,
-                },
-                description: "ConvNeXtV2 Large ImageNet 1000-class".to_string(),
-                enabled: true,
-            },
-        );
-
-        // EfficientNet-Lite4
-        models.insert(
-            "efficientnet-lite4".to_string(),
-            ModelConfig {
-                name: "EfficientNet-Lite4".to_string(),
-                model_type: ModelType::Tagging,
-                path: PathBuf::from("efficientnet-lite4-11.onnx"),
-                input: ModelInputSpec {
-                    width: 224,
-                    height: 224,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 1000,
-                    labels: Vec::new(),
-                    labels_file: None,
-                    format: None,
-                    multi_label: false,
-                },
-                description: "EfficientNet-Lite4 ImageNet 1000-class, good accuracy".to_string(),
-                enabled: true,
-            },
-        );
-
-        // ResNet-50
-        models.insert(
-            "resnet50".to_string(),
-            ModelConfig {
-                name: "ResNet-50".to_string(),
-                model_type: ModelType::Tagging,
-                path: PathBuf::from("resnet50-v2-7.onnx"),
-                input: ModelInputSpec {
-                    width: 224,
-                    height: 224,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 1000,
-                    labels: Vec::new(),
-                    labels_file: None,
-                    format: None,
-                    multi_label: false,
-                },
-                description: "ResNet-50 ImageNet 1000-class, classic architecture".to_string(),
-                enabled: true,
-            },
-        );
-
-        // ViT Base (ImageNet)
-        models.insert(
-            "vit-base-224".to_string(),
-            ModelConfig {
-                name: "ViT Base 224".to_string(),
-                model_type: ModelType::Tagging,
-                path: PathBuf::from("vit-base-224.onnx"),
-                input: ModelInputSpec {
-                    width: 224,
-                    height: 224,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 1000,
-                    labels: Vec::new(),
-                    labels_file: None,
-                    format: None,
-                    multi_label: false,
-                },
-                description: "Vision Transformer (ViT) Base ImageNet 1000-class".to_string(),
-                enabled: true,
-            },
-        );
-
-        // ViT Base Quantized (ImageNet)
-        models.insert(
-            "vit-base-224-q8".to_string(),
-            ModelConfig {
-                name: "ViT Base 224 (Quantized)".to_string(),
-                model_type: ModelType::Tagging,
-                path: PathBuf::from("vit-base-224-q8.onnx"),
-                input: ModelInputSpec {
-                    width: 224,
-                    height: 224,
-                    normalize: true,
-                    layout: "NCHW".to_string(),
-                    mean: None,
-                    std: None,
-                },
-                output: ModelOutputSpec {
-                    num_classes: 1000,
-                    labels: Vec::new(),
-                    labels_file: None,
-                    format: None,
-                    multi_label: false,
-                },
-                description: "Vision Transformer (ViT) Base ImageNet, int8 quantized".to_string(),
-                enabled: true,
-            },
-        );
-
-        // =========================================================================
-        // TAGGING MODELS - WD Taggers (Danbooru-style)
-        // =========================================================================
-
-        let wd_label_file = PathBuf::from("wd-tags.csv");
-
-        for (id, name) in [
-            ("wd-vit-tagger-v3", "WD ViT Tagger V3"),
-            ("wd-vit-large-tagger-v3", "WD ViT Large Tagger V3"),
-            ("wd-swinv2-tagger-v3", "WD SwinV2 Tagger V3"),
-            ("wd-eva02-large-tagger-v3", "WD EVA02 Large Tagger V3"),
-            ("p1atdev-wd-swinv2-tagger-v3-hf", "p1atdev WD SwinV2 Tagger V3"),
-        ] {
-            models.insert(
-                id.to_string(),
-                ModelConfig {
-                    name: name.to_string(),
-                    model_type: ModelType::Tagging,
-                    path: PathBuf::from(format!("{}.onnx", id)),
-                    input: ModelInputSpec {
-                        width: 448,
-                        height: 448,
-                        normalize: true,
-                        layout: "NHWC".to_string(),  // WD models use NHWC (batch, height, width, channels)
-                        mean: Some([0.5, 0.5, 0.5]),
-                        std: Some([0.5, 0.5, 0.5]),
-                    },
-                    output: ModelOutputSpec {
-                        num_classes: 10861,
-                        labels: Vec::new(),
-                        labels_file: Some(wd_label_file.clone()),
-                        format: None,
-                        multi_label: true, // WD taggers use sigmoid (multi-label), not softmax
-                    },
-                    description: format!("{name} (Danbooru-style tagger)"),
-                    enabled: true,
-                },
-            );
-        }
-
-        // NOTE: Camie Tagger (70K+ tags) available but requires JSON label format
-        // Add support for JSON labels to enable: https://huggingface.co/Camais03/camie-tagger
-
-        models
-    }
-
     /// Get a model config by ID, checking user overrides first, then built-in.
     pub fn get_model(&self, id: &str) -> Option<&ModelConfig> {
         self.models.get(id).or_else(|| self.builtin_models.get(id))
@@ -947,6 +519,7 @@ impl ClassifierConfig {
                         layout: "NHWC".to_string(),
                         mean: None,
                         std: None,
+                        batch_dim: true,
                     },
                     output: ModelOutputSpec {
                         num_classes: 5,
@@ -983,6 +556,7 @@ impl ClassifierConfig {
                         layout: "NCHW".to_string(),
                         mean: None,
                         std: None,
+                        batch_dim: true,
                     },
                     output: ModelOutputSpec {
                         num_classes: 1000,
@@ -1012,6 +586,7 @@ impl ClassifierConfig {
                         layout: "NCHW".to_string(),
                         mean: None,
                         std: None,
+                        batch_dim: true,
                     },
                     output: ModelOutputSpec {
                         num_classes: 1000,
@@ -1041,6 +616,7 @@ impl ClassifierConfig {
                         layout: "NCHW".to_string(),
                         mean: None,
                         std: None,
+                        batch_dim: true,
                     },
                     output: ModelOutputSpec {
                         num_classes: 1000,

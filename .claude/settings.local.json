@@ -8,14 +8,28 @@
       "Bash(task test:*)",
       "Bash(dir:*)",
       "WebSearch",
+      "WebFetch",
       "Bash(ls:*)",
       "Bash(task build:*)",
       "Bash(./target/debug/camden.exe:*)",
+      "Bash(task frontend:*)",
+      "Bash(awk:*)",
+      "Bash(find:*)",
+      "Bash(task --list-all:*)",
+      "Bash(curl:*)",
+      "Bash(sort:*)",
       "Bash(cargo build:*)",
-      "Bash(python:*)",
-      "Bash(task frontend:*)"
+      "Bash(cargo run:*)",
+      "Bash(./target/release/camden.exe preview-scan:*)",
+      "Bash(cargo clean:*)",
+      "Bash(./target/release/camden.exe:*)",
+      "Bash(cargo doc:*)",
+      "Bash(1)"
     ],
-    "deny": [],
+    "deny": [
+      "Bash(python:*)",
+      "Bash(cargo :*)"
+    ],
     "ask": []
   }
 }

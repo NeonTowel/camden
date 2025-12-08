@@ -1,6 +1,6 @@
 //! ONNX Runtime wrapper and shared utilities.
 
-use ndarray::{Array, Array4};
+use ndarray::{Array, ArrayD};
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
@@ -76,11 +76,12 @@ pub fn load_session(model_path: &Path) -> Result<Session, ClassifierError> {
 
 /// Preprocess an image for model inference.
 /// Resizes and normalizes to the expected input format.
+#[allow(dead_code)]
 pub fn preprocess_image(
     image_path: &Path,
     target_size: (i32, i32),
     normalize: bool,
-) -> Result<Array4<f32>, ClassifierError> {
+) -> Result<ArrayD<f32>, ClassifierError> {
     preprocess_image_with_layout(
         image_path,
         target_size,
@@ -88,6 +89,7 @@ pub fn preprocess_image(
         "NCHW",
         IMAGE_NET_MEAN,
         IMAGE_NET_STD,
+        true,
     )
 }
 
@@ -99,7 +101,8 @@ pub fn preprocess_image_with_layout(
     layout: &str,
     mean: [f32; 3],
     std: [f32; 3],
-) -> Result<Array4<f32>, ClassifierError> {
+    batch_dim: bool,
+) -> Result<ArrayD<f32>, ClassifierError> {
     use opencv::core::{Mat, MatTraitConst, MatTraitConstManual, Size, CV_32FC3};
     use opencv::imgcodecs;
     use opencv::imgproc;
@@ -157,38 +160,68 @@ pub fn preprocess_image_with_layout(
 
     // Handle different layouts
     if layout == "NHWC" {
-        // Add batch dimension -> NHWC [1, H, W, C]
-        let nhwc = hwc.insert_axis(ndarray::Axis(0));
-        
-        if normalize {
-            let mut normalized = nhwc.into_owned();
-            for c in 0..3 {
-                normalized
-                    .slice_mut(ndarray::s![0, .., .., c])
-                    .mapv_inplace(|v| (v - mean[c]) / std[c]);
+        if batch_dim {
+            // Add batch dimension -> NHWC [1, H, W, C]
+            let nhwc = hwc.insert_axis(ndarray::Axis(0));
+
+            if normalize {
+                let mut normalized = nhwc.into_owned();
+                for c in 0..3 {
+                    normalized
+                        .slice_mut(ndarray::s![0, .., .., c])
+                        .mapv_inplace(|v| (v - mean[c]) / std[c]);
+                }
+                Ok(normalized.into_dyn())
+            } else {
+                Ok(nhwc.into_owned().into_dyn())
             }
-            Ok(normalized)
         } else {
-            Ok(nhwc.into_owned())
+            // No batch dimension -> HWC [H, W, C]
+            if normalize {
+                let mut normalized = hwc.into_owned();
+                for c in 0..3 {
+                    normalized
+                        .slice_mut(ndarray::s![.., .., c])
+                        .mapv_inplace(|v| (v - mean[c]) / std[c]);
+                }
+                Ok(normalized.into_dyn())
+            } else {
+                Ok(hwc.into_owned().into_dyn())
+            }
         }
     } else {
         // NCHW format (default, PyTorch-style)
         // Transpose HWC -> CHW
         let chw = hwc.permuted_axes([2, 0, 1]);
-        
-        // Add batch dimension -> NCHW
-        let nchw = chw.insert_axis(ndarray::Axis(0));
 
-        if normalize {
-            let mut normalized = nchw.into_owned();
-            for c in 0..3 {
-                normalized
-                    .slice_mut(ndarray::s![0, c, .., ..])
-                    .mapv_inplace(|v| (v - mean[c]) / std[c]);
+        if batch_dim {
+            // Add batch dimension -> NCHW [1, C, H, W]
+            let nchw = chw.insert_axis(ndarray::Axis(0));
+
+            if normalize {
+                let mut normalized = nchw.into_owned();
+                for c in 0..3 {
+                    normalized
+                        .slice_mut(ndarray::s![0, c, .., ..])
+                        .mapv_inplace(|v| (v - mean[c]) / std[c]);
+                }
+                Ok(normalized.into_dyn())
+            } else {
+                Ok(nchw.into_owned().into_dyn())
             }
-            Ok(normalized)
         } else {
-            Ok(nchw.into_owned())
+            // No batch dimension -> CHW [C, H, W]
+            if normalize {
+                let mut normalized = chw.into_owned();
+                for c in 0..3 {
+                    normalized
+                        .slice_mut(ndarray::s![c, .., ..])
+                        .mapv_inplace(|v| (v - mean[c]) / std[c]);
+                }
+                Ok(normalized.into_dyn())
+            } else {
+                Ok(chw.into_owned().into_dyn())
+            }
         }
     }
 }

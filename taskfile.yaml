@@ -1,6 +1,8 @@
 version: 3
 
-#dotenv: ['.env']
+env:
+  VCPKG_ROOT: "{{ .ROOT_DIR }}\\.vendor\\vcpkg"
+  RUSTFLAGS: "-C target-feature=+crt-static"
 
 tasks:
   default:
@@ -279,6 +281,205 @@ tasks:
         echo "  moderation_models = [\"gantman-nsfw\", \"vladmandic-nudenet\"]"
         echo "  tagging_models = [\"mobilenetv2\", \"vit-base-224-q8\"]"
 
+  deps-auxiliary-files:
+    silent: true
+    desc: Download auxiliary files required for compilation
+    cmds:
+      - |
+        mkdir -p .vendor/models
+
+        echo "Downloading auxiliary files for tagging..."
+
+        # ImageNet 1000 class labels
+        if [ -f ".vendor/models/imagenet_labels.txt" ]; then
+          echo "  ✅ imagenet_labels.txt: already exists"
+        else
+          echo "  → Downloading ImageNet labels (1000 classes)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/imagenet_labels_raw.txt" \
+            "https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt"
+          # Clean up Python dict format to plain text
+          cat ".vendor/models/imagenet_labels_raw.txt" | awk -F': ' '{print $2}' | sed "s/'//g" | sed 's/ *$//' > ".vendor/models/imagenet_labels.txt"
+          rm ".vendor/models/imagenet_labels_raw.txt"
+          echo "  ✅ imagenet_labels.txt: created (1000 lines)"
+        fi
+
+        # Tag categories configuration (already exists, created by write above)
+        if [ ! -f ".vendor/models/tag_categories.toml" ]; then
+          echo "  ⚠️  tag_categories.toml: missing! This should have been created."
+          echo "     Run the build again or check file permissions."
+        else
+          echo "  ✅ tag_categories.toml: already exists"
+        fi
+
+        echo ""
+        echo "Auxiliary files ready for compilation!"
+
+  deps-models-phase1:
+    silent: true
+    desc: Download Phase 1 ensemble models from ModelRegistryRewrite.md
+    deps: [deps-auxiliary-files]
+    cmds:
+      - |
+        mkdir -p .vendor/models
+
+        echo "============================================"
+        echo "Downloading Phase 1 Models (5 moderation + 3 tagging)"
+        echo "============================================"
+        echo ""
+
+        # ============ PHASE 1 MODERATION MODELS (5) ============
+
+        echo "Phase 1 Moderation Models (5):"
+        echo ""
+
+        # 1. n4xtan NSFW Classification (CLIP-based)
+        if [ -f ".vendor/models/nsfw_model.onnx" ]; then
+          echo "[1/5] n4xtan NSFW Classification: already downloaded."
+        else
+          echo "[1/5] Downloading n4xtan NSFW Classification (CLIP-based)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/nsfw_model.onnx" \
+            "https://huggingface.co/n4xtan/nsfw-classification/resolve/main/nsfw_model.onnx"
+        fi
+
+        # 2. spiele NSFW Image Detector (4-tier EVA02)
+        if [ -f ".vendor/models/spiele-nsfw-image-detector.onnx" ]; then
+          echo "[2/5] spiele NSFW Image Detector: already downloaded."
+        else
+          echo "[2/5] Downloading spiele NSFW Image Detector (EVA02, 4-tier)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/spiele-nsfw-image-detector.onnx" \
+            "https://huggingface.co/spiele/nsfw_image_detector-ONNX/resolve/main/onnx/model.onnx"
+        fi
+
+        # 3. vladmandic NudeNet (body part detection)
+        if [ -f ".vendor/models/nudenet.onnx" ]; then
+          echo "[3/5] vladmandic NudeNet: already downloaded."
+        else
+          echo "[3/5] Downloading vladmandic NudeNet (body part detection, ~12MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/nudenet.onnx" \
+            "https://huggingface.co/vladmandic/nudenet/resolve/main/nudenet.onnx"
+        fi
+
+        # 4. deepghs NudeNet ONNX (YOLOv8-based)
+        if [ -f ".vendor/models/deepghs-320n.onnx" ]; then
+          echo "[4/5] deepghs NudeNet ONNX: already downloaded."
+        else
+          echo "[4/5] Downloading deepghs NudeNet ONNX (YOLOv8-based)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/deepghs-320n.onnx" \
+            "https://huggingface.co/deepghs/nudenet_onnx/resolve/main/320n.onnx"
+        fi
+
+        if [ -f ".vendor/models/deepghs-nms-yolov8.onnx" ]; then
+          echo "    → deepghs NMS YOLOv8: already downloaded."
+        else
+          echo "    → Downloading deepghs NMS YOLOv8..."
+          curl --ssl-no-revoke -L -o ".vendor/models/deepghs-nms-yolov8.onnx" \
+            "https://huggingface.co/deepghs/nudenet_onnx/resolve/main/nms-yolov8.onnx"
+        fi
+
+        # 5. TaufiqDP MobileNetV4 NSFW (5-class GantMan schema)
+        if [ -f ".vendor/models/taufiqdp-mobilenetv4-nsfw.onnx" ]; then
+          echo "[5/5] TaufiqDP MobileNetV4 NSFW: already downloaded."
+        else
+          echo "[5/5] Downloading TaufiqDP MobileNetV4 NSFW (5-class GantMan schema)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/taufiqdp-mobilenetv4-nsfw.onnx" \
+            "https://huggingface.co/taufiqdp/mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier/resolve/main/mobilenetv4_conv_small.e2400_r224_in1k_nsfw_classifier.onnx"
+        fi
+
+        echo ""
+        echo "Phase 1 Tagging Models (3):"
+        echo ""
+
+        # ============ PHASE 1 TAGGING MODELS (3) ============
+
+        # 1. SmilingWolf WD v1.4 ConvNeXtV2 Tagger V2 (9,999 Danbooru tags)
+        if [ -f ".vendor/models/smilingwolf-wd-v1-4-convnextv2-tagger-v2.onnx" ]; then
+          echo "[1/3] WD v1.4 ConvNeXtV2 Tagger V2: already downloaded."
+        else
+          echo "[1/3] Downloading WD v1.4 ConvNeXtV2 Tagger V2 (9,999 tags, 388MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/smilingwolf-wd-v1-4-convnextv2-tagger-v2.onnx" \
+            "https://huggingface.co/SmilingWolf/wd-v1-4-convnextv2-tagger-v2/resolve/main/model.onnx"
+        fi
+
+        # Download labels for WD ConvNeXtV2
+        if [ -f ".vendor/models/selected_tags.csv" ]; then
+          echo "    → selected_tags.csv: already downloaded."
+        else
+          echo "    → Downloading selected_tags.csv (254KB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/selected_tags.csv" \
+            "https://huggingface.co/SmilingWolf/wd-v1-4-convnextv2-tagger-v2/resolve/main/selected_tags.csv"
+        fi
+
+        # 2. FancyFeast JoyTag (3,472 Danbooru tags)
+        if [ -f ".vendor/models/fancyfeast-joytag.onnx" ]; then
+          echo "[2/3] FancyFeast JoyTag: already downloaded."
+        else
+          echo "[2/3] Downloading FancyFeast JoyTag (3,472 tags, 366MB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/fancyfeast-joytag.onnx" \
+            "https://huggingface.co/fancyfeast/joytag/resolve/main/model.onnx"
+        fi
+
+        # Download labels for JoyTag
+        if [ -f ".vendor/models/top_tags.txt" ]; then
+          echo "    → top_tags.txt: already downloaded."
+        else
+          echo "    → Downloading top_tags.txt (76.8KB)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/top_tags.txt" \
+            "https://huggingface.co/fancyfeast/joytag/resolve/main/top_tags.txt"
+        fi
+
+        # 3. Cella110n CL Tagger (42,163 tags)
+        # Note: deepghs-nudenet-onnx (moderation) can also be used for tagging
+        if [ -f ".vendor/models/cl_tagger_1_02_model.onnx" ]; then
+          echo "[3/3] Cella110n CL Tagger: already downloaded."
+        else
+          echo "[3/3] Downloading Cella110n CL Tagger (42,163 tags)..."
+          curl --ssl-no-revoke -L -o ".vendor/models/cl_tagger_1_02_model.onnx" \
+            "https://huggingface.co/cella110n/cl_tagger/resolve/main/cl_tagger_1_02/model.onnx"
+        fi
+
+        # Download labels for CL Tagger
+        if [ -f ".vendor/models/cl_tagger_1_02_tag_mapping.json" ]; then
+          echo "    → cl_tagger_1_02_tag_mapping.json: already downloaded."
+        else
+          echo "    → Downloading cl_tagger_1_02_tag_mapping.json..."
+          curl --ssl-no-revoke -L -o ".vendor/models/cl_tagger_1_02_tag_mapping.json" \
+            "https://huggingface.co/cella110n/cl_tagger/resolve/main/cl_tagger_1_02/tag_mapping.json"
+        fi
+
+        echo ""
+        echo "============================================"
+        echo "Phase 1 Models Downloaded Successfully!"
+        echo "============================================"
+        echo ""
+        echo "Moderation Models (5):"
+        echo "  ✅ nsfw_model.onnx (n4xtan CLIP-based)"
+        echo "  ✅ spiele-nsfw-image-detector.onnx (4-tier EVA02)"
+        echo "  ✅ nudenet.onnx (vladmandic body part detection) ★ Dual-purpose"
+        echo "  ✅ deepghs-320n.onnx + deepghs-nms-yolov8.onnx (YOLOv8-based) ★ Dual-purpose"
+        echo "  ✅ taufiqdp-mobilenetv4-nsfw.onnx (5-class MobileNetV4)"
+        echo ""
+        echo "Tagging Models (3):"
+        echo "  ✅ smilingwolf-wd-v1-4-convnextv2-tagger-v2.onnx + selected_tags.csv"
+        echo "  ✅ fancyfeast-joytag.onnx + top_tags.txt"
+        echo "  ✅ cl_tagger_1_02_model.onnx + cl_tagger_1_02_tag_mapping.json"
+        echo ""
+        echo "★ Dual-purpose models can be used in BOTH moderation and tagging pipelines!"
+        echo ""
+        echo "Recommended Phase 1 Ensemble (3 best from each):"
+        echo ""
+        echo "  moderation_models = ["
+        echo "    \"spiele-nsfw-image-detector\",  # High-res 4-tier EVA02"
+        echo "    \"taufiqdp-mobilenetv4-nsfw\",   # Fast 5-class MobileNetV4"
+        echo "    \"vladmandic-nudenet\",           # Body part detection"
+        echo "  ]"
+        echo ""
+        echo "  tagging_models = ["
+        echo "    \"smilingwolf-wd-v1-4-convnextv2-tagger-v2\",  # 9,999 tags"
+        echo "    \"fancyfeast-joytag\",                          # 3,472 tags"
+        echo "    \"cella110n-cl-tagger\",                        # 42,163 tags"
+        echo "  ]"
+        echo ""
+
   convert-hf-model:
     desc: Convert a HuggingFace model to ONNX (requires Python + torch)
     cmds:
@@ -344,18 +545,7 @@ tasks:
   check:
     silent: true
     cmds:
-      - |
-        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
-        # Unset dynamic linking vars to avoid conflicts
-        unset OPENCV_LINK_PATHS
-        unset OPENCV_LINK_LIBS
-        unset OPENCV_INCLUDE_PATHS
-        
-        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
-        # We can pass rustflags via environment variable
-        export RUSTFLAGS="-C target-feature=+crt-static"
-
-        cargo check --workspace --all-targets
+      - cargo check --workspace --all-targets
 
   fmt:
     cmds:
@@ -364,64 +554,24 @@ tasks:
   test:
     silent: true
     cmds:
-      - |
-        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
-        unset OPENCV_LINK_PATHS
-        unset OPENCV_LINK_LIBS
-        unset OPENCV_INCLUDE_PATHS
-        export RUSTFLAGS="-C target-feature=+crt-static"
-        
-        cargo test --workspace --all-targets
+      - cargo test --workspace --all-targets
 
   frontend:
     desc: Run the Slint frontend application
     cmds:
-      - |
-        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
-        # Unset dynamic linking vars to avoid conflicts
-        unset OPENCV_LINK_PATHS
-        unset OPENCV_LINK_LIBS
-        unset OPENCV_INCLUDE_PATHS
-        
-        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
-        # We can pass rustflags via environment variable
-        export RUSTFLAGS="-C target-feature=+crt-static"
-
-        cargo run -p camden-frontend
+      - cargo run -p camden-frontend
 
   build:
     desc: Build with static OpenCV (using local vcpkg)
     silent: true
     cmds:
-      - |
-        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
-        # Unset dynamic linking vars to avoid conflicts
-        unset OPENCV_LINK_PATHS
-        unset OPENCV_LINK_LIBS
-        unset OPENCV_INCLUDE_PATHS
-        
-        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
-        # We can pass rustflags via environment variable
-        export RUSTFLAGS="-C target-feature=+crt-static"
-        
-        cargo build --workspace
+      - cargo build --workspace
 
   release:
     desc: Release build with static OpenCV (using local vcpkg)
     silent: true
     cmds:
-      - |
-        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
-        # Unset dynamic linking vars to avoid conflicts
-        unset OPENCV_LINK_PATHS
-        unset OPENCV_LINK_LIBS
-        unset OPENCV_INCLUDE_PATHS
-        
-        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
-        # We can pass rustflags via environment variable
-        export RUSTFLAGS="-C target-feature=+crt-static"
-        
-        cargo build --workspace --release
+      - cargo build --workspace --release
 
   run:
     desc: Run the camden cli application with the given arguments
@@ -430,15 +580,4 @@ tasks:
       ARGS: "{{ .CLI_ARGS | default \"--help\" }}"
     cmds:
       - |
-
-        export VCPKG_ROOT="$PWD\\.vendor\\vcpkg"
-        # Unset dynamic linking vars to avoid conflicts
-        unset OPENCV_LINK_PATHS
-        unset OPENCV_LINK_LIBS
-        unset OPENCV_INCLUDE_PATHS
-        
-        # Ensure static CRT is used if vcpkg's triplet expects it (x64-windows-static usually does)
-        # We can pass rustflags via environment variable
-        export RUSTFLAGS="-C target-feature=+crt-static"
-
         cargo run -p camden -- {{ .ARGS }}

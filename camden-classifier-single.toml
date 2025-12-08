@@ -1,0 +1,22 @@
+# Camden Classifier Configuration - Single Model Mode
+#
+# Simple configuration using one model each for moderation and tagging.
+# This is the recommended configuration for most use cases.
+
+models_dir = ".vendor/models"
+ort_library = ".vendor/onnxruntime/lib/onnxruntime.dll"
+
+# Single model mode (fast and efficient)
+moderation_model = "taufiqdp-mobilenetv4-nsfw"
+tagging_model = "smilingwolf-wd-v1-4-convnextv2-tagger-v2"
+
+# Available Phase 1 Moderation Models:
+# - "n4xtan-nsfw-classification"       # 3-class CLIP ViT (Safe, Mild, Explicit)
+# - "spiele-nsfw-image-detector"       # 4-tier EVA02 (Neutral, Low, Medium, High)
+# - "taufiqdp-mobilenetv4-nsfw"        # 5-class MobileNetV4 (GantMan schema)
+#
+# Available Phase 1 Tagging Models:
+# - "smilingwolf-wd-v1-4-convnextv2-tagger-v2"  # 9,999 Danbooru tags
+# - "fancyfeast-joytag"                          # 3,472 Danbooru tags
+# - "trpakov-vit-face-expression"                # 7 emotions
+# - "cella110n-cl-tagger"                        # 42,163 tags

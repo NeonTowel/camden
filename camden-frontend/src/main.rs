@@ -27,6 +27,7 @@ struct InternalFile {
     resolution_tier: ResolutionTier,
     moderation_tier: String,
     tags: String,
+    #[allow(dead_code)]
     dimensions: (u32, u32),
     orientation: i32, // 0=Landscape, 1=Portrait, 2=Square
     is_keep_candidate: bool,
@@ -568,11 +569,9 @@ fn perform_scan(
         }
     }
 
-    // Collect all photos for gallery (flatten all groups)
-    let all_photos: Vec<InternalFile> = groups
-        .iter()
-        .flat_map(|g| g.files.clone())
-        .collect();
+    // Collect ALL photos for gallery (not just actionable groups)
+    // This ensures the gallery shows all scanned photos, including unique high-res images
+    let all_photos: Vec<InternalFile> = map_all_photos(&summary);
 
     if let Ok(mut state_mut) = state.lock() {
         state_mut.groups = groups;
@@ -743,6 +742,44 @@ fn build_group_model(groups: &[InternalGroup]) -> ModelRc<GroupData> {
         .collect();
 
     ModelRc::from(Rc::new(VecModel::from(group_data)))
+}
+
+/// Map all photos from summary for gallery view (includes all scanned photos)
+fn map_all_photos(summary: &ScanSummary) -> Vec<InternalFile> {
+    summary
+        .groups
+        .iter()
+        .flat_map(|group| {
+            group.files.iter().map(|file| {
+                let display_name = file
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let info = format_file_info(file);
+                let sort_date = file.captured_at.clone().or_else(|| file.modified.clone());
+                let dimensions = (file.dimensions.0 as u32, file.dimensions.1 as u32);
+                let orientation = classify_orientation(dimensions.0, dimensions.1);
+
+                InternalFile {
+                    path: file.path.clone(),
+                    display_name,
+                    info,
+                    size_bytes: file.size_bytes,
+                    sort_date,
+                    selected: false,
+                    thumbnail: file.thumbnail.clone(),
+                    resolution_tier: file.resolution_tier,
+                    moderation_tier: file.moderation_tier.clone().unwrap_or_default(),
+                    tags: file.tags.join(", "),
+                    dimensions,
+                    orientation,
+                    is_keep_candidate: false,
+                }
+            })
+        })
+        .collect()
 }
 
 fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {

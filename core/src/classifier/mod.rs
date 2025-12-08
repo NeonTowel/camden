@@ -33,7 +33,10 @@
 //! ```
 
 mod config;
+mod ensemble;
+mod labels;
 mod moderation;
+mod models;
 mod runtime;
 mod tagging;
 
@@ -42,8 +45,6 @@ pub use moderation::{AggregationStrategy, EnsembleModerationClassifier, Moderati
 pub use runtime::{ClassifierError, ModelPaths};
 pub use tagging::{EnsembleTaggingClassifier, ImageTag, TagCategory, TaggingClassifier, TaggingConfig};
 
-use csv::ReaderBuilder;
-use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -131,6 +132,141 @@ pub struct ImageClassifier {
     config: ClassifierConfig,
 }
 
+/// Load moderation classifier (single or ensemble) from configuration.
+///
+/// Handles both single-model and ensemble modes, loading the appropriate
+/// classifier variant based on the configuration.
+///
+/// # Arguments
+///
+/// * `config` - Classifier configuration with model settings
+///
+/// # Returns
+///
+/// A `ModerationClassifierVariant` (either Single or Ensemble)
+fn load_moderation_classifier(
+    config: &ClassifierConfig,
+) -> Result<ModerationClassifierVariant, ClassifierError> {
+    let models_dir = &config.models_dir;
+
+    if config.is_ensemble_mode() {
+        // Ensemble mode: load multiple models
+        let model_configs: Vec<_> = config
+            .active_moderation_models()
+            .iter()
+            .filter_map(|model_config| {
+                let path = if model_config.path.is_absolute() {
+                    model_config.path.clone()
+                } else {
+                    models_dir.join(&model_config.path)
+                };
+                let mod_config = ModerationConfig::from_specs(
+                    &model_config.input,
+                    &model_config.output.labels,
+                    model_config.output.format.as_deref(),
+                );
+                Some((path, mod_config))
+            })
+            .collect();
+
+        if model_configs.is_empty() {
+            return Err(ClassifierError::Processing(
+                "no valid moderation models configured for ensemble".to_string(),
+            ));
+        }
+
+        Ok(ModerationClassifierVariant::Ensemble(
+            EnsembleModerationClassifier::with_configs(model_configs)?,
+        ))
+    } else {
+        // Single model mode
+        let moderation_path = config.active_moderation_path().ok_or_else(|| {
+            ClassifierError::Processing("no active moderation model configured".to_string())
+        })?;
+
+        let single_classifier = if let Some(model_config) = config.active_moderation_model() {
+            let mod_config = ModerationConfig::from_specs(
+                &model_config.input,
+                &model_config.output.labels,
+                model_config.output.format.as_deref(),
+            );
+            NsfwClassifier::with_config(&moderation_path, mod_config)?
+        } else {
+            NsfwClassifier::new(&moderation_path)?
+        };
+
+        Ok(ModerationClassifierVariant::Single(single_classifier))
+    }
+}
+
+/// Load tagging classifier (single or ensemble) from configuration.
+///
+/// Handles both single-model and ensemble modes, loading the appropriate
+/// classifier variant based on the configuration. Also loads label files
+/// for each model.
+///
+/// # Arguments
+///
+/// * `config` - Classifier configuration with model settings
+///
+/// # Returns
+///
+/// A `TaggingClassifierVariant` (either Single or Ensemble)
+fn load_tagging_classifier(
+    config: &ClassifierConfig,
+) -> Result<TaggingClassifierVariant, ClassifierError> {
+    let models_dir = &config.models_dir;
+
+    if config.is_tagging_ensemble_mode() {
+        // Tagging ensemble mode: load multiple models
+        let model_configs: Vec<_> = config
+            .active_tagging_models()
+            .iter()
+            .filter_map(|model_config| {
+                let path = if model_config.path.is_absolute() {
+                    model_config.path.clone()
+                } else {
+                    models_dir.join(&model_config.path)
+                };
+                let tag_config = TaggingConfig::from_specs_with_output(
+                    &model_config.input,
+                    model_config.output.multi_label,
+                );
+                let labels = load_tagging_labels(models_dir, &model_config.output).ok()?;
+                Some((path, tag_config, labels))
+            })
+            .collect();
+
+        if model_configs.is_empty() {
+            return Err(ClassifierError::Processing(
+                "no valid tagging models configured for ensemble".to_string(),
+            ));
+        }
+
+        Ok(TaggingClassifierVariant::Ensemble(
+            EnsembleTaggingClassifier::with_configs(model_configs)?,
+        ))
+    } else {
+        // Single tagging model mode
+        let tagging_path = config.active_tagging_path().ok_or_else(|| {
+            ClassifierError::Processing("no active tagging model configured".to_string())
+        })?;
+
+        let single_classifier = if let Some(model_config) = config.active_tagging_model() {
+            let tag_config = TaggingConfig::from_specs_with_output(
+                &model_config.input,
+                model_config.output.multi_label,
+            );
+            let labels = load_tagging_labels(models_dir, &model_config.output)?;
+            TaggingClassifier::with_config_and_labels(&tagging_path, tag_config, labels)?
+        } else {
+            TaggingClassifier::new(&tagging_path)?
+        };
+
+        Ok(TaggingClassifierVariant::Single(single_classifier))
+    }
+}
+
 impl ImageClassifier {
     /// Create a new classifier with models from the specified paths.
     pub fn new(paths: &ModelPaths) -> Result<Self, ClassifierError> {
@@ -151,105 +287,8 @@ impl ImageClassifier {
     
     /// Create a classifier from a configuration.
     pub fn from_config(config: ClassifierConfig) -> Result<Self, ClassifierError> {
-        let models_dir = config.models_dir.clone();
-
-        // Check if ensemble mode is enabled
-        let moderation = if config.is_ensemble_mode() {
-            // Ensemble mode: load multiple models
-            let model_configs: Vec<_> = config.active_moderation_models()
-                .iter()
-                .filter_map(|model_config| {
-                    let path = if model_config.path.is_absolute() {
-                        model_config.path.clone()
-                    } else {
-                        models_dir.join(&model_config.path)
-                    };
-                    let mod_config = ModerationConfig::from_specs(
-                        &model_config.input,
-                        &model_config.output.labels,
-                        model_config.output.format.as_deref(),
-                    );
-                    Some((path, mod_config))
-                })
-                .collect();
-
-            if model_configs.is_empty() {
-                return Err(ClassifierError::Processing(
-                    "no valid moderation models configured for ensemble".to_string()
-                ));
-            }
-
-            ModerationClassifierVariant::Ensemble(
-                EnsembleModerationClassifier::with_configs(model_configs)?
-            )
-        } else {
-            // Single model mode
-            let moderation_path = config.active_moderation_path().ok_or_else(|| {
-                ClassifierError::Processing("no active moderation model configured".to_string())
-            })?;
-
-            let single_classifier = if let Some(model_config) = config.active_moderation_model() {
-                let mod_config = ModerationConfig::from_specs(
-                    &model_config.input,
-                    &model_config.output.labels,
-                    model_config.output.format.as_deref(),
-                );
-                NsfwClassifier::with_config(&moderation_path, mod_config)?
-            } else {
-                NsfwClassifier::new(&moderation_path)?
-            };
-
-            ModerationClassifierVariant::Single(single_classifier)
-        };
-
-        // Check if tagging ensemble mode is enabled
-        let tagging = if config.is_tagging_ensemble_mode() {
-            // Tagging ensemble mode: load multiple models
-            let model_configs: Vec<_> = config.active_tagging_models()
-                .iter()
-                .filter_map(|model_config| {
-                    let path = if model_config.path.is_absolute() {
-                        model_config.path.clone()
-                    } else {
-                        models_dir.join(&model_config.path)
-                    };
-                    let tag_config = TaggingConfig::from_specs_with_output(
-                        &model_config.input,
-                        model_config.output.multi_label,
-                    );
-                    let labels = load_tagging_labels(&models_dir, &model_config.output).ok()?;
-                    Some((path, tag_config, labels))
-                })
-                .collect();
-
-            if model_configs.is_empty() {
-                return Err(ClassifierError::Processing(
-                    "no valid tagging models configured for ensemble".to_string()
-                ));
-            }
-
-            TaggingClassifierVariant::Ensemble(
-                EnsembleTaggingClassifier::with_configs(model_configs)?
-            )
-        } else {
-            // Single tagging model mode
-            let tagging_path = config.active_tagging_path().ok_or_else(|| {
-                ClassifierError::Processing("no active tagging model configured".to_string())
-            })?;
-
-            let single_classifier = if let Some(model_config) = config.active_tagging_model() {
-                let tag_config = TaggingConfig::from_specs_with_output(
-                    &model_config.input,
-                    model_config.output.multi_label,
-                );
-                let labels = load_tagging_labels(&models_dir, &model_config.output)?;
-                TaggingClassifier::with_config_and_labels(&tagging_path, tag_config, labels)?
-            } else {
-                TaggingClassifier::new(&tagging_path)?
-            };
-
-            TaggingClassifierVariant::Single(single_classifier)
-        };
+        let moderation = load_moderation_classifier(&config)?;
+        let tagging = load_tagging_classifier(&config)?;
 
         Ok(Self {
             moderation,
@@ -306,81 +345,12 @@ pub struct ClassificationResult {
     pub tags: Vec<ImageTag>,
 }
 
+/// Load tagging labels from model output specification.
+///
+/// This is a convenience wrapper around `labels::load_labels`.
 fn load_tagging_labels(
     models_dir: &Path,
     output: &ModelOutputSpec,
 ) -> Result<Vec<String>, ClassifierError> {
-    if !output.labels.is_empty() {
-        return Ok(output.labels.clone());
-    }
-
-    if let Some(labels_file) = &output.labels_file {
-        let label_path = if labels_file.is_absolute() {
-            labels_file.clone()
-        } else {
-            models_dir.join(labels_file)
-        };
-
-        if !label_path.exists() {
-            return Err(ClassifierError::ModelNotFound(label_path));
-        }
-
-        if let Some(ext) = label_path.extension().and_then(|s| s.to_str()) {
-            if ext.eq_ignore_ascii_case("csv") {
-                let mut reader = ReaderBuilder::new()
-                    .has_headers(true)
-                    .from_path(&label_path)
-                    .map_err(|e| {
-                        ClassifierError::Processing(format!(
-                            "failed to read labels CSV {}: {}",
-                            label_path.display(),
-                            e
-                        ))
-                    })?;
-
-                let mut labels = Vec::new();
-                for record in reader.records() {
-                    let record = record.map_err(|e| {
-                        ClassifierError::Processing(format!("invalid label record: {}", e))
-                    })?;
-                    if let Some(name) = record.get(1) {
-                        let trimmed = name.trim();
-                        if !trimmed.is_empty() {
-                            labels.push(trimmed.to_string());
-                        }
-                    }
-                }
-
-                if labels.is_empty() {
-                    return Err(ClassifierError::Processing(format!(
-                        "no labels found in {}",
-                        label_path.display()
-                    )));
-                }
-
-                return Ok(labels);
-            }
-        }
-
-        let content = fs::read_to_string(&label_path).map_err(|e| {
-            ClassifierError::Processing(format!(
-                "failed to read label file {}: {}",
-                label_path.display(),
-                e
-            ))
-        })?;
-
-        let parsed: Vec<String> = content
-            .lines()
-            .map(|line| line.trim())
-            .filter(|line| !line.is_empty())
-            .map(String::from)
-            .collect();
-
-        if !parsed.is_empty() {
-            return Ok(parsed);
-        }
-    }
-
-    Ok(TaggingClassifier::default_labels())
+    labels::load_labels(models_dir, output)
 }

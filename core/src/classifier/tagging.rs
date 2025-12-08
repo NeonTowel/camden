@@ -7,14 +7,59 @@ use super::runtime::{
     load_session, preprocess_image_with_layout, softmax, ClassifierError, IMAGE_NET_MEAN,
     IMAGE_NET_STD,
 };
+use once_cell::sync::Lazy;
 use ort::session::Session;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
-/// Minimum confidence threshold for tags (0.0-1.0).
+/// Default minimum confidence threshold for tags (0.0-1.0).
 /// Tags below this threshold are filtered out.
 /// 0.6 = 60% confidence
-pub const MIN_TAG_CONFIDENCE: f32 = 0.6;
+pub const DEFAULT_MIN_TAG_CONFIDENCE: f32 = 0.6;
+
+/// TOML structure for tag category configuration.
+#[derive(Debug, Deserialize)]
+struct TagCategoriesConfig {
+    categories: HashMap<String, CategoryKeywords>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CategoryKeywords {
+    keywords: Vec<String>,
+}
+
+/// Lazy-loaded category keywords from embedded TOML file.
+static CATEGORY_KEYWORDS: Lazy<HashMap<TagCategory, Vec<String>>> = Lazy::new(|| {
+    const EMBEDDED_CONFIG: &str = include_str!("../../../.vendor/models/tag_categories.toml");
+
+    // Parse TOML configuration
+    let config: TagCategoriesConfig = toml::from_str(EMBEDDED_CONFIG)
+        .expect("Failed to parse tag_categories.toml");
+
+    // Convert string keys to TagCategory enum
+    let mut category_map = HashMap::new();
+
+    for (key, value) in config.categories {
+        let category = match key.as_str() {
+            "animal" => TagCategory::Animal,
+            "vehicle" => TagCategory::Vehicle,
+            "food" => TagCategory::Food,
+            "nature" => TagCategory::Nature,
+            "person" => TagCategory::Person,
+            "structure" => TagCategory::Structure,
+            "device" => TagCategory::Device,
+            "furniture" => TagCategory::Furniture,
+            "sport" => TagCategory::Sport,
+            "clothing" => TagCategory::Clothing,
+            "music" => TagCategory::Music,
+            _ => continue, // Skip unknown categories
+        };
+        category_map.insert(category, value.keywords);
+    }
+
+    category_map
+});
 
 /// Configuration for the tagging classifier.
 #[derive(Clone, Debug)]
@@ -31,9 +76,14 @@ pub struct TaggingConfig {
     pub normalization_mean: [f32; 3],
     /// Normalization std to apply when `normalize` is true.
     pub normalization_std: [f32; 3],
+    /// Whether to include batch dimension (rank-4 vs rank-3)
+    pub batch_dim: bool,
     /// Whether this is a multi-label classifier (sigmoid outputs).
     /// When true, softmax is skipped and raw sigmoid probabilities are used.
     pub multi_label: bool,
+    /// Minimum confidence threshold for filtering tags (0.0-1.0).
+    /// Tags below this threshold will be filtered out.
+    pub min_confidence: f32,
 }
 
 impl Default for TaggingConfig {
@@ -45,7 +95,9 @@ impl Default for TaggingConfig {
             layout: "NCHW".to_string(),
             normalization_mean: IMAGE_NET_MEAN,
             normalization_std: IMAGE_NET_STD,
+            batch_dim: true,
             multi_label: false,
+            min_confidence: DEFAULT_MIN_TAG_CONFIDENCE,
         }
     }
 }
@@ -60,7 +112,9 @@ impl TaggingConfig {
             layout: input.layout.clone(),
             normalization_mean: input.mean.unwrap_or(IMAGE_NET_MEAN),
             normalization_std: input.std.unwrap_or(IMAGE_NET_STD),
+            batch_dim: input.batch_dim,
             multi_label: false,
+            min_confidence: DEFAULT_MIN_TAG_CONFIDENCE,
         }
     }
 
@@ -73,7 +127,9 @@ impl TaggingConfig {
             layout: input.layout.clone(),
             normalization_mean: input.mean.unwrap_or(IMAGE_NET_MEAN),
             normalization_std: input.std.unwrap_or(IMAGE_NET_STD),
+            batch_dim: input.batch_dim,
             multi_label,
+            min_confidence: DEFAULT_MIN_TAG_CONFIDENCE,
         }
     }
 }
@@ -130,6 +186,7 @@ impl TaggingClassifier {
             &self.config.layout,
             self.config.normalization_mean,
             self.config.normalization_std,
+            self.config.batch_dim,
         )?;
 
         // Get input name from model
@@ -196,7 +253,7 @@ impl TaggingClassifier {
         let tags: Vec<ImageTag> = indexed
             .into_iter()
             .take(max_tags)
-            .filter(|(_, score)| *score >= MIN_TAG_CONFIDENCE) // Filter by confidence threshold
+            .filter(|(_, score)| *score >= self.config.min_confidence) // Filter by confidence threshold
             .filter_map(|(idx, score)| {
                 self.labels.get(idx).map(|label| {
                     let (category, clean_label) = categorize_label(label);
@@ -213,8 +270,10 @@ impl TaggingClassifier {
         Ok(tags)
     }
 
+    /// Load default ImageNet 1000 labels from embedded text file.
     pub(super) fn default_labels() -> Vec<String> {
-        IMAGENET_LABELS.iter().map(|label| label.to_string()).collect()
+        const EMBEDDED_LABELS: &str = include_str!("../../../.vendor/models/imagenet_labels.txt");
+        EMBEDDED_LABELS.lines().map(String::from).collect()
     }
 }
 
@@ -232,7 +291,7 @@ pub struct ImageTag {
 }
 
 /// Category for organizing tags.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TagCategory {
     /// Animals
     Animal,
@@ -284,340 +343,20 @@ fn categorize_label(label: &str) -> (TagCategory, &str) {
     // Extract the primary term (before comma if present)
     let primary = label.split(',').next().unwrap_or(label).trim();
 
-    // Simple keyword-based categorization
+    // Simple keyword-based categorization using lazy-loaded keywords
     let lower = label.to_lowercase();
 
-    let category = if ANIMAL_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Animal
-    } else if VEHICLE_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Vehicle
-    } else if FOOD_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Food
-    } else if NATURE_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Nature
-    } else if PERSON_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Person
-    } else if STRUCTURE_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Structure
-    } else if DEVICE_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Device
-    } else if FURNITURE_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Furniture
-    } else if SPORT_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Sport
-    } else if CLOTHING_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Clothing
-    } else if MUSIC_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        TagCategory::Music
-    } else {
-        TagCategory::Object
-    };
+    // Check each category's keywords
+    for (category, keywords) in CATEGORY_KEYWORDS.iter() {
+        if keywords.iter().any(|k| lower.contains(k)) {
+            return (*category, primary);
+        }
+    }
 
-    (category, primary)
+    // Default to Object if no match
+    (TagCategory::Object, primary)
 }
 
-// Category keyword lists
-const ANIMAL_KEYWORDS: &[&str] = &[
-    "dog", "cat", "bird", "fish", "horse", "cow", "sheep", "pig", "chicken", "duck", "goose",
-    "rabbit", "mouse", "rat", "hamster", "guinea", "snake", "lizard", "turtle", "frog", "toad",
-    "spider", "insect", "butterfly", "bee", "ant", "beetle", "lion", "tiger", "bear", "wolf",
-    "fox", "deer", "elephant", "giraffe", "zebra", "monkey", "ape", "gorilla", "whale", "dolphin",
-    "shark", "seal", "penguin", "owl", "eagle", "hawk", "parrot", "terrier", "retriever",
-    "shepherd", "bulldog", "poodle", "beagle", "hound", "spaniel", "collie", "husky", "malamute",
-    "corgi", "dachshund", "chihuahua", "pug", "boxer", "mastiff", "rottweiler", "doberman",
-    "persian", "siamese", "tabby", "kitten", "puppy",
-];
-
-const VEHICLE_KEYWORDS: &[&str] = &[
-    "car", "truck", "bus", "train", "plane", "airplane", "aircraft", "helicopter", "boat", "ship",
-    "bicycle", "motorcycle", "scooter", "van", "taxi", "ambulance", "fire engine", "police",
-    "tractor", "forklift", "crane", "bulldozer", "limousine", "convertible", "sedan", "suv",
-    "minivan", "wagon", "jeep", "pickup", "trailer", "carriage", "locomotive", "subway", "tram",
-    "ferry", "yacht", "canoe", "kayak", "speedboat", "sailboat",
-];
-
-const FOOD_KEYWORDS: &[&str] = &[
-    "food", "fruit", "vegetable", "meat", "bread", "cake", "pizza", "burger", "sandwich", "salad",
-    "soup", "pasta", "rice", "noodle", "sushi", "egg", "cheese", "milk", "butter", "cream", "ice",
-    "chocolate", "candy", "cookie", "pie", "donut", "muffin", "croissant", "bagel", "pretzel",
-    "apple", "orange", "banana", "grape", "strawberry", "cherry", "peach", "pear", "watermelon",
-    "pineapple", "mango", "lemon", "lime", "coconut", "avocado", "tomato", "potato", "carrot",
-    "broccoli", "lettuce", "onion", "pepper", "mushroom", "corn", "bean", "pea", "cucumber",
-    "eggplant", "zucchini", "squash", "pumpkin", "cabbage", "spinach", "celery", "garlic",
-];
-
-const NATURE_KEYWORDS: &[&str] = &[
-    "tree", "flower", "plant", "grass", "forest", "mountain", "hill", "valley", "river", "lake",
-    "ocean", "sea", "beach", "island", "desert", "jungle", "swamp", "meadow", "field", "garden",
-    "park", "cliff", "waterfall", "volcano", "glacier", "canyon", "cave", "rock", "stone",
-    "sand", "snow", "ice", "cloud", "sky", "sun", "moon", "star", "rainbow", "sunset", "sunrise",
-    "landscape", "seascape", "coast", "shore", "reef", "coral",
-];
-
-const PERSON_KEYWORDS: &[&str] = &[
-    "person", "man", "woman", "child", "baby", "boy", "girl", "face", "head", "hand", "foot",
-    "arm", "leg", "body", "portrait", "crowd", "group", "family", "couple", "wedding", "groom",
-    "bride", "athlete", "player", "dancer", "singer", "actor", "model",
-];
-
-const STRUCTURE_KEYWORDS: &[&str] = &[
-    "building", "house", "apartment", "skyscraper", "tower", "bridge", "tunnel", "road", "street",
-    "highway", "path", "sidewalk", "fence", "wall", "gate", "door", "window", "roof", "chimney",
-    "church", "temple", "mosque", "cathedral", "castle", "palace", "museum", "library", "school",
-    "hospital", "hotel", "restaurant", "shop", "store", "mall", "market", "stadium", "arena",
-    "theater", "cinema", "airport", "station", "port", "harbor", "dam", "lighthouse", "monument",
-    "statue", "fountain", "arch", "dome", "pyramid", "pagoda",
-];
-
-const DEVICE_KEYWORDS: &[&str] = &[
-    "computer", "laptop", "desktop", "monitor", "screen", "keyboard", "mouse", "phone",
-    "smartphone", "tablet", "camera", "television", "tv", "radio", "speaker", "headphone",
-    "microphone", "printer", "scanner", "projector", "remote", "controller", "console", "game",
-    "watch", "clock", "calculator", "battery", "charger", "cable", "wire", "plug", "socket",
-    "switch", "button", "dial", "meter", "gauge", "sensor", "antenna", "satellite", "robot",
-    "drone", "ipod", "cd", "dvd", "usb", "disk", "drive", "modem", "router", "server",
-];
-
-const FURNITURE_KEYWORDS: &[&str] = &[
-    "chair", "table", "desk", "sofa", "couch", "bed", "mattress", "pillow", "blanket", "sheet",
-    "curtain", "carpet", "rug", "lamp", "chandelier", "shelf", "bookcase", "cabinet", "drawer",
-    "wardrobe", "closet", "mirror", "frame", "vase", "pot", "plant", "basket", "box", "container",
-    "bin", "trash", "bucket", "broom", "mop", "vacuum", "iron", "fan", "heater", "air",
-    "refrigerator", "freezer", "oven", "stove", "microwave", "toaster", "blender", "mixer",
-    "dishwasher", "washer", "dryer", "sink", "faucet", "toilet", "bathtub", "shower",
-];
-
-const SPORT_KEYWORDS: &[&str] = &[
-    "ball", "bat", "racket", "net", "goal", "basket", "hoop", "pool", "tennis", "golf",
-    "football", "soccer", "basketball", "baseball", "volleyball", "hockey", "cricket", "rugby",
-    "boxing", "wrestling", "martial", "karate", "judo", "fencing", "archery", "shooting",
-    "cycling", "swimming", "diving", "surfing", "skiing", "snowboard", "skating", "running",
-    "jogging", "walking", "hiking", "climbing", "gym", "fitness", "yoga", "weight", "dumbbell",
-    "barbell", "treadmill", "bicycle", "helmet", "glove", "paddle", "oar", "ski", "pole",
-];
-
-const CLOTHING_KEYWORDS: &[&str] = &[
-    "shirt", "pants", "jeans", "shorts", "skirt", "dress", "suit", "jacket", "coat", "sweater",
-    "hoodie", "vest", "blouse", "top", "bottom", "underwear", "sock", "shoe", "boot", "sandal",
-    "slipper", "sneaker", "heel", "flat", "hat", "cap", "beanie", "scarf", "glove", "mitten",
-    "belt", "tie", "bow", "necklace", "bracelet", "ring", "earring", "watch", "glasses",
-    "sunglasses", "bag", "purse", "backpack", "wallet", "umbrella", "mask", "uniform", "costume",
-    "bikini", "swimsuit", "robe", "pajama", "apron", "jersey", "kimono", "sari",
-];
-
-const MUSIC_KEYWORDS: &[&str] = &[
-    "guitar", "piano", "keyboard", "drum", "violin", "cello", "bass", "flute", "clarinet",
-    "saxophone", "trumpet", "trombone", "horn", "harmonica", "accordion", "banjo", "ukulele",
-    "harp", "organ", "synthesizer", "microphone", "speaker", "amplifier", "mixer", "turntable",
-    "record", "vinyl", "cd", "cassette", "headphone", "earphone", "baton", "conductor", "orchestra",
-    "band", "choir", "concert", "stage", "studio", "instrument", "musical",
-];
-
-// ImageNet 1000 class labels (abbreviated - full list would be 1000 entries)
-// This is a subset of common labels; for production, load from a file
-const IMAGENET_LABELS: &[&str] = &[
-    "tench", "goldfish", "great white shark", "tiger shark", "hammerhead shark",
-    "electric ray", "stingray", "cock", "hen", "ostrich",
-    "brambling", "goldfinch", "house finch", "junco", "indigo bunting",
-    "American robin", "bulbul", "jay", "magpie", "chickadee",
-    "American dipper", "kite", "bald eagle", "vulture", "great grey owl",
-    "fire salamander", "smooth newt", "newt", "spotted salamander", "axolotl",
-    "American bullfrog", "tree frog", "tailed frog", "loggerhead sea turtle", "leatherback sea turtle",
-    "mud turtle", "terrapin", "box turtle", "banded gecko", "green iguana",
-    "Carolina anole", "desert grassland whiptail lizard", "agama", "frilled-necked lizard", "alligator lizard",
-    "Gila monster", "European green lizard", "chameleon", "Komodo dragon", "Nile crocodile",
-    "American alligator", "triceratops", "worm snake", "ring-necked snake", "eastern hog-nosed snake",
-    "smooth green snake", "kingsnake", "garter snake", "water snake", "vine snake",
-    "night snake", "boa constrictor", "African rock python", "Indian cobra", "green mamba",
-    "sea snake", "Saharan horned viper", "eastern diamondback rattlesnake", "sidewinder", "trilobite",
-    "harvestman", "scorpion", "yellow garden spider", "barn spider", "European garden spider",
-    "southern black widow", "tarantula", "wolf spider", "tick", "centipede",
-    "black grouse", "ptarmigan", "ruffed grouse", "prairie grouse", "peacock",
-    "quail", "partridge", "grey parrot", "macaw", "sulphur-crested cockatoo",
-    "lorikeet", "coucal", "bee eater", "hornbill", "hummingbird",
-    "jacamar", "toucan", "duck", "red-breasted merganser", "goose",
-    "black swan", "tusker", "echidna", "platypus", "wallaby",
-    "koala", "wombat", "jellyfish", "sea anemone", "brain coral",
-    "flatworm", "nematode", "conch", "snail", "slug",
-    "sea slug", "chiton", "chambered nautilus", "Dungeness crab", "rock crab",
-    "fiddler crab", "red king crab", "American lobster", "spiny lobster", "crayfish",
-    "hermit crab", "isopod", "white stork", "black stork", "spoonbill",
-    "flamingo", "little blue heron", "great egret", "bittern", "crane",
-    "limpkin", "common gallinule", "American coot", "bustard", "ruddy turnstone",
-    "dunlin", "common redshank", "dowitcher", "oystercatcher", "pelican",
-    "king penguin", "albatross", "grey whale", "killer whale", "dugong",
-    "sea lion", "Chihuahua", "Japanese Chin", "Maltese", "Pekingese",
-    "Shih Tzu", "King Charles Spaniel", "Papillon", "toy terrier", "Rhodesian Ridgeback",
-    "Afghan Hound", "Basset Hound", "Beagle", "Bloodhound", "Bluetick Coonhound",
-    "Black and Tan Coonhound", "Treeing Walker Coonhound", "English foxhound", "Redbone Coonhound", "borzoi",
-    "Irish Wolfhound", "Italian Greyhound", "Whippet", "Ibizan Hound", "Norwegian Elkhound",
-    "Otterhound", "Saluki", "Scottish Deerhound", "Weimaraner", "Staffordshire Bull Terrier",
-    "American Staffordshire Terrier", "Bedlington Terrier", "Border Terrier", "Kerry Blue Terrier", "Irish Terrier",
-    "Norfolk Terrier", "Norwich Terrier", "Yorkshire Terrier", "Wire Fox Terrier", "Lakeland Terrier",
-    "Sealyham Terrier", "Airedale Terrier", "Cairn Terrier", "Australian Terrier", "Dandie Dinmont Terrier",
-    "Boston Terrier", "Miniature Schnauzer", "Giant Schnauzer", "Standard Schnauzer", "Scottish Terrier",
-    "Tibetan Terrier", "Australian Silky Terrier", "Soft-coated Wheaten Terrier", "West Highland White Terrier", "Lhasa Apso",
-    "Flat-Coated Retriever", "Curly-coated Retriever", "Golden Retriever", "Labrador Retriever", "Chesapeake Bay Retriever",
-    "German Shorthaired Pointer", "Vizsla", "English Setter", "Irish Setter", "Gordon Setter",
-    "Brittany", "Clumber Spaniel", "English Springer Spaniel", "Welsh Springer Spaniel", "Cocker Spaniel",
-    "Sussex Spaniel", "Irish Water Spaniel", "Kuvasz", "Schipperke", "Groenendael",
-    "Malinois", "Briard", "Australian Kelpie", "Komondor", "Old English Sheepdog",
-    "Shetland Sheepdog", "collie", "Border Collie", "Bouvier des Flandres", "Rottweiler",
-    "German Shepherd Dog", "Dobermann", "Miniature Pinscher", "Greater Swiss Mountain Dog", "Bernese Mountain Dog",
-    "Appenzeller Sennenhund", "Entlebucher Sennenhund", "Boxer", "Bullmastiff", "Tibetan Mastiff",
-    "French Bulldog", "Great Dane", "St. Bernard", "husky", "Alaskan Malamute",
-    "Siberian Husky", "Dalmatian", "Affenpinscher", "Basenji", "pug",
-    "Leonberger", "Newfoundland", "Pyrenean Mountain Dog", "Samoyed", "Pomeranian",
-    "Chow Chow", "Keeshond", "Griffon Bruxellois", "Pembroke Welsh Corgi", "Cardigan Welsh Corgi",
-    "Toy Poodle", "Miniature Poodle", "Standard Poodle", "Mexican hairless dog", "grey wolf",
-    "Alaskan tundra wolf", "red wolf", "coyote", "dingo",
-    "dhole", "African wild dog", "hyena", "red fox", "kit fox",
-    "Arctic fox", "grey fox", "tabby cat", "tiger cat", "Persian cat",
-    "Siamese cat", "Egyptian Mau", "cougar", "lynx", "leopard",
-    "snow leopard", "jaguar", "lion", "tiger", "cheetah",
-    "brown bear", "American black bear", "polar bear", "sloth bear", "mongoose",
-    "meerkat", "tiger beetle", "ladybug", "ground beetle", "longhorn beetle",
-    "leaf beetle", "dung beetle", "rhinoceros beetle", "weevil", "fly",
-    "bee", "ant", "grasshopper", "cricket", "stick insect",
-    "cockroach", "mantis", "cicada", "leafhopper", "lacewing",
-    "dragonfly", "damselfly", "red admiral", "ringlet", "monarch butterfly",
-    "small white", "sulphur butterfly", "gossamer-winged butterfly", "starfish", "sea urchin",
-    "sea cucumber", "cottontail rabbit", "hare", "Angora rabbit", "hamster",
-    "porcupine", "fox squirrel", "marmot", "beaver", "guinea pig",
-    "common sorrel", "zebra", "pig", "wild boar", "warthog",
-    "hippopotamus", "ox", "water buffalo", "bison", "ram",
-    "bighorn sheep", "Alpine ibex", "hartebeest", "impala", "gazelle",
-    "dromedary", "llama", "weasel", "mink", "European polecat",
-    "black-footed ferret", "otter", "skunk", "badger", "armadillo",
-    "three-toed sloth", "orangutan", "gorilla", "chimpanzee", "gibbon",
-    "siamang", "guenon", "patas monkey", "baboon", "macaque",
-    "langur", "black-and-white colobus", "proboscis monkey", "marmoset", "white-headed capuchin",
-    "howler monkey", "titi", "Geoffroy's spider monkey", "common squirrel monkey", "ring-tailed lemur",
-    "indri", "Asian elephant", "African bush elephant", "red panda", "giant panda",
-    "snoek", "eel", "coho salmon", "rock beauty", "clownfish",
-    "sturgeon", "garfish", "lionfish", "pufferfish", "abacus",
-    "abaya", "academic gown", "accordion", "acoustic guitar", "aircraft carrier",
-    "airliner", "airship", "altar", "ambulance", "amphibious vehicle",
-    "analog clock", "apiary", "apron", "waste container", "assault rifle",
-    "backpack", "bakery", "balance beam", "balloon", "ballpoint pen",
-    "Band-Aid", "banjo", "baluster", "barbell", "barber chair",
-    "barbershop", "barn", "barometer", "barrel", "wheelbarrow",
-    "baseball", "basketball", "bassinet", "bassoon", "swimming cap",
-    "bath towel", "bathtub", "station wagon", "lighthouse", "beaker",
-    "military cap", "beer bottle", "beer glass", "bell tower", "baby bib",
-    "tandem bicycle", "bikini", "ring binder", "binoculars", "birdhouse",
-    "boathouse", "bobsled", "bolo tie", "poke bonnet", "bookcase",
-    "bookstore", "bottle cap", "hunting bow", "bow tie", "brass",
-    "bra", "breakwater", "breastplate", "broom", "bucket",
-    "buckle", "bulletproof vest", "high-speed train", "butcher shop", "taxicab",
-    "cauldron", "candle", "cannon", "canoe", "can opener",
-    "cardigan", "car mirror", "carousel", "tool kit", "carton",
-    "car wheel", "automated teller machine", "cassette", "cassette player", "castle",
-    "catamaran", "CD player", "cello", "mobile phone", "chain",
-    "chain-link fence", "chain mail", "chainsaw", "chest", "chiffonier",
-    "chime", "china cabinet", "Christmas stocking", "church", "movie theater",
-    "cleaver", "cliff dwelling", "cloak", "clogs", "cocktail shaker",
-    "coffee mug", "coffeemaker", "coil", "combination lock", "computer keyboard",
-    "confectionery store", "container ship", "convertible", "corkscrew", "cornet",
-    "cowboy boot", "cowboy hat", "cradle", "crane (machine)", "crash helmet",
-    "crate", "infant bed", "Crock Pot", "croquet ball", "crutch",
-    "cuirass", "dam", "desk", "desktop computer", "rotary dial telephone",
-    "diaper", "digital clock", "digital watch", "dining table", "dishcloth",
-    "dishwasher", "disc brake", "dock", "dog sled", "dome",
-    "doormat", "drilling rig", "drum", "drumstick", "dumbbell",
-    "Dutch oven", "electric fan", "electric guitar", "electric locomotive", "entertainment center",
-    "envelope", "espresso machine", "face powder", "feather boa", "filing cabinet",
-    "fireboat", "fire engine", "fire screen sheet", "flagpole", "flute",
-    "folding chair", "football helmet", "forklift", "fountain", "fountain pen",
-    "four-poster bed", "freight car", "French horn", "frying pan", "fur coat",
-    "garbage truck", "gas mask", "gas pump", "goblet", "go-kart",
-    "golf ball", "golf cart", "gondola", "gong", "gown",
-    "grand piano", "greenhouse", "grille", "grocery store", "guillotine",
-    "barrette", "hair spray", "half-track", "hammer", "hamper",
-    "hair dryer", "hand-held computer", "handkerchief", "hard disk drive", "harmonica",
-    "harp", "harvester", "hatchet", "holster", "home theater",
-    "honeycomb", "hook", "hoop skirt", "horizontal bar", "horse-drawn vehicle",
-    "hourglass", "iPod", "clothes iron", "jack-o'-lantern", "jeans",
-    "jeep", "T-shirt", "jigsaw puzzle", "pulled rickshaw", "joystick",
-    "kimono", "knee pad", "knot", "lab coat", "ladle",
-    "lampshade", "laptop computer", "lawn mower", "lens cap", "paper knife",
-    "library", "lifeboat", "lighter", "limousine", "ocean liner",
-    "lipstick", "slip-on shoe", "lotion", "speaker", "loupe",
-    "sawmill", "magnetic compass", "mail bag", "mailbox", "tights",
-    "tank suit", "manhole cover", "maraca", "marimba", "mask",
-    "match", "maypole", "maze", "measuring cup", "medicine cabinet",
-    "megalith", "microphone", "microwave oven", "military uniform", "milk can",
-    "minibus", "miniskirt", "minivan", "missile", "mitten",
-    "mixing bowl", "mobile home", "Model T", "modem", "monastery",
-    "monitor", "moped", "mortar", "square academic cap", "mosque",
-    "mosquito net", "scooter", "mountain bike", "tent", "computer mouse",
-    "mousetrap", "moving van", "muzzle", "nail", "neck brace",
-    "necklace", "nipple", "notebook computer", "obelisk", "oboe",
-    "ocarina", "odometer", "oil filter", "organ", "oscilloscope",
-    "overskirt", "bullock cart", "oxygen mask", "packet", "paddle",
-    "paddle wheel", "padlock", "paintbrush", "pajamas", "palace",
-    "pan flute", "paper towel", "parachute", "parallel bars", "park bench",
-    "parking meter", "passenger car", "patio", "payphone", "pedestal",
-    "pencil case", "pencil sharpener", "perfume", "Petri dish", "photocopier",
-    "plectrum", "Pickelhaube", "picket fence", "pickup truck", "pier",
-    "piggy bank", "pill bottle", "pillow", "ping-pong ball", "pinwheel",
-    "pirate ship", "pitcher", "hand plane", "planetarium", "plastic bag",
-    "plate rack", "plow", "plunger", "Polaroid camera", "pole",
-    "police van", "poncho", "billiard table", "soda bottle", "pot",
-    "potter's wheel", "power drill", "prayer rug", "printer", "prison",
-    "projectile", "projector", "hockey puck", "punching bag", "purse",
-    "quill", "quilt", "race car", "racket", "radiator",
-    "radio", "radio telescope", "rain barrel", "recreational vehicle", "reel",
-    "reflex camera", "refrigerator", "remote control", "restaurant", "revolver",
-    "rifle", "rocking chair", "rotisserie", "eraser", "rugby ball",
-    "ruler", "running shoe", "safe", "safety pin", "salt shaker",
-    "sandal", "sarong", "saxophone", "scabbard", "weighing scale",
-    "school bus", "schooner", "scoreboard", "CRT screen", "screw",
-    "screwdriver", "seat belt", "sewing machine", "shield", "shoe store",
-    "shoji", "shopping basket", "shopping cart", "shovel", "shower cap",
-    "shower curtain", "ski", "ski mask", "sleeping bag", "slide rule",
-    "sliding door", "slot machine", "snorkel", "snowmobile", "snowplow",
-    "soap dispenser", "soccer ball", "sock", "solar thermal collector", "sombrero",
-    "soup bowl", "space bar", "space heater", "space shuttle", "spatula",
-    "motorboat", "spider web", "spindle", "sports car", "spotlight",
-    "stage", "steam locomotive", "through arch bridge", "steel drum", "stethoscope",
-    "scarf", "stone wall", "stopwatch", "stove", "strainer",
-    "tram", "stretcher", "couch", "stupa", "submarine",
-    "suit", "sundial", "sunglass", "sunglasses", "sunscreen",
-    "suspension bridge", "mop", "sweatshirt", "swimsuit", "swing",
-    "switch", "syringe", "table lamp", "tank", "tape player",
-    "teapot", "teddy bear", "television", "tennis ball", "thatched roof",
-    "front curtain", "thimble", "threshing machine", "throne", "tile roof",
-    "toaster", "tobacco shop", "toilet seat", "torch", "totem pole",
-    "tow truck", "toy store", "tractor", "semi-trailer truck", "tray",
-    "trench coat", "tricycle", "trimaran", "tripod", "triumphal arch",
-    "trolleybus", "trombone", "tub", "turnstile", "typewriter keyboard",
-    "umbrella", "unicycle", "upright piano", "vacuum cleaner", "vase",
-    "vault", "velvet", "vending machine", "vestment", "viaduct",
-    "violin", "volleyball", "waffle iron", "wall clock", "wallet",
-    "wardrobe", "military aircraft", "sink", "washing machine", "water bottle",
-    "water jug", "water tower", "whiskey jug", "whistle", "wig",
-    "window screen", "window shade", "Windsor tie", "wine bottle", "wing",
-    "wok", "wooden spoon", "wool", "split-rail fence", "shipwreck",
-    "yawl", "yurt", "website", "comic book", "crossword",
-    "traffic sign", "traffic light", "dust jacket", "menu", "plate",
-    "guacamole", "consomme", "hot pot", "trifle", "ice cream",
-    "ice pop", "baguette", "bagel", "pretzel", "cheeseburger",
-    "hot dog", "mashed potato", "cabbage", "broccoli", "cauliflower",
-    "zucchini", "spaghetti squash", "acorn squash", "butternut squash", "cucumber",
-    "artichoke", "bell pepper", "cardoon", "mushroom", "Granny Smith",
-    "strawberry", "orange", "lemon", "fig", "pineapple",
-    "banana", "jackfruit", "custard apple", "pomegranate", "hay",
-    "carbonara", "chocolate syrup", "dough", "meatloaf", "pizza",
-    "pot pie", "burrito", "red wine", "espresso", "cup",
-    "eggnog", "alp", "bubble", "cliff", "coral reef",
-    "geyser", "lakeshore", "promontory", "shoal", "seashore",
-    "valley", "volcano", "baseball player", "bridegroom", "scuba diver",
-    "rapeseed", "daisy", "yellow lady's slipper", "corn", "acorn",
-    "rose hip", "horse chestnut seed", "coral fungus", "agaric", "gyromitra",
-    "stinkhorn mushroom", "earth star", "hen of the woods", "bolete", "ear",
-    "toilet paper",
-];
 
 /// Ensemble classifier that runs multiple tagging models and merges results.
 pub struct EnsembleTaggingClassifier {
@@ -668,15 +407,20 @@ impl EnsembleTaggingClassifier {
         }
 
         // Run all classifiers and collect their tags
-        let mut all_tags: Vec<ImageTag> = Vec::new();
+        let mut all_tags_by_model: Vec<Vec<ImageTag>> = Vec::new();
         for classifier in &mut self.classifiers {
             // Each classifier returns up to max_tags * 2 to give more variety
             let tags = classifier.classify(image_path, max_tags * 2)?;
-            all_tags.extend(tags);
+            all_tags_by_model.push(tags);
         }
 
+        // Get min_confidence from first classifier (all should use same threshold)
+        let min_confidence = self.classifiers.first()
+            .map(|c| c.config.min_confidence)
+            .unwrap_or(DEFAULT_MIN_TAG_CONFIDENCE);
+
         // Merge tags by name (aggregate confidence scores)
-        let merged_tags = self.merge_tags(all_tags);
+        let merged_tags = super::ensemble::merge_tags(all_tags_by_model, min_confidence);
 
         // Sort by confidence and take top max_tags
         let mut sorted_tags = merged_tags;
@@ -684,44 +428,5 @@ impl EnsembleTaggingClassifier {
         sorted_tags.truncate(max_tags);
 
         Ok(sorted_tags)
-    }
-
-    /// Merge tags with the same name by averaging their confidence scores.
-    fn merge_tags(&self, tags: Vec<ImageTag>) -> Vec<ImageTag> {
-        use std::collections::HashMap;
-
-        // Group tags by name
-        let mut tag_map: HashMap<String, Vec<f32>> = HashMap::new();
-        let mut tag_prototypes: HashMap<String, ImageTag> = HashMap::new();
-
-        for tag in tags {
-            tag_map
-                .entry(tag.name.clone())
-                .or_insert_with(Vec::new)
-                .push(tag.confidence);
-
-            // Keep first occurrence as prototype (for label, category)
-            tag_prototypes.entry(tag.name.clone()).or_insert(tag);
-        }
-
-        // Average confidence scores for each tag
-        tag_map
-            .into_iter()
-            .filter_map(|(name, confidences)| {
-                let avg_confidence = confidences.iter().sum::<f32>() / confidences.len() as f32;
-
-                // Only return tags that meet minimum confidence after averaging
-                if avg_confidence >= MIN_TAG_CONFIDENCE {
-                    tag_prototypes.get(&name).map(|prototype| ImageTag {
-                        name: prototype.name.clone(),
-                        label: prototype.label.clone(),
-                        confidence: avg_confidence,
-                        category: prototype.category,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect()
     }
 }

@@ -224,6 +224,155 @@ fn scan_sequential(
     group_records(records, detector)
 }
 
+/// Validate and optionally rename a file to GUID format.
+///
+/// If GUID renaming is enabled in config, this function validates the filename
+/// is a valid GUIDv4 and renames it if needed.
+///
+/// # Arguments
+///
+/// * `path` - The original file path
+/// * `config` - Scanner configuration with renaming settings
+/// * `progress_bar` - Progress bar for status updates
+///
+/// # Returns
+///
+/// * `Some(PathBuf)` - The final path (original or renamed)
+/// * `None` - If validation or rename fails
+fn validate_and_maybe_rename(
+    path: PathBuf,
+    config: &ScanConfig,
+    progress_bar: &ProgressBar,
+) -> Option<PathBuf> {
+    if !config.rename_to_guid {
+        return Some(path);
+    }
+
+    match ensure_guid_name(&path) {
+        Ok(new_path) => {
+            if new_path != path {
+                progress_bar.set_message(format!(
+                    "Renamed: {} -> {}",
+                    path.file_name().unwrap_or_default().to_string_lossy(),
+                    new_path.file_name().unwrap_or_default().to_string_lossy()
+                ));
+            }
+            Some(new_path)
+        }
+        Err(error) => {
+            progress_bar.set_message(format!("Rename error: {}", error));
+            None
+        }
+    }
+}
+
+/// Analyze image features including hash, resolution, and thumbnail.
+///
+/// Performs duplicate detection analysis and optionally generates thumbnails
+/// and detects low resolution images.
+///
+/// # Arguments
+///
+/// * `path` - Path to the image file
+/// * `config` - Scanner configuration
+/// * `detector` - Duplicate detector for analysis
+/// * `cache` - Optional thumbnail cache
+/// * `progress_bar` - Progress bar for status updates
+///
+/// # Returns
+///
+/// * `Some(ImageAnalysis)` - Analysis results with metadata
+/// * `None` - If analysis fails
+fn analyze_image_features(
+    path: &Path,
+    config: &ScanConfig,
+    detector: &DuplicateDetector,
+    cache: Option<&ThumbnailCache>,
+    progress_bar: &ProgressBar,
+) -> Option<ImageAnalysis> {
+    match detector.analyze(path) {
+        Ok(mut analysis) => {
+            // Generate thumbnail if cache is available
+            if let Some(cache) = cache {
+                match cache.ensure(path, analysis.features.fingerprint) {
+                    Ok(thumbnail) => {
+                        analysis.metadata.thumbnail = Some(thumbnail);
+                    }
+                    Err(error) => {
+                        progress_bar.set_message(format!("Thumbnail error: {}", error));
+                    }
+                }
+            }
+
+            // Detect low resolution if enabled
+            if config.detect_low_resolution {
+                let (w, h) = analysis.metadata.dimensions;
+                analysis.metadata.resolution_tier = resolution_tier(w, h);
+            }
+
+            Some(analysis)
+        }
+        Err(error) => {
+            progress_bar.set_message(format!("Error: {}", error));
+            None
+        }
+    }
+}
+
+/// Run AI classification (moderation + tagging) on an image.
+///
+/// Performs content moderation and tag generation using the provided classifier.
+/// Updates the metadata in place with results.
+///
+/// # Arguments
+///
+/// * `path` - Path to the image file
+/// * `classifier` - Locked image classifier
+/// * `metadata` - Image metadata to update with classification results
+/// * `progress_bar` - Progress bar for status updates
+fn classify_and_tag(
+    path: &Path,
+    classifier: &mut ImageClassifier,
+    metadata: &mut ImageMetadata,
+    progress_bar: &ProgressBar,
+) {
+    // Run moderation
+    match classifier.moderate(path) {
+        Ok(flags) => {
+            metadata.moderation_tier = Some(flags.tier.to_string());
+        }
+        Err(e) => {
+            eprintln!("Moderation classification failed for {}: {}", path.display(), e);
+            progress_bar.set_message(format!("Moderation error: {}", e));
+        }
+    }
+
+    // Run tagging (max 5 tags)
+    match classifier.tag(path, MAX_TAGS_PER_IMAGE) {
+        Ok(tags) => {
+            metadata.tags = tags
+                .into_iter()
+                .map(|t| {
+                    if DEBUG_SHOW_TAG_CONFIDENCE {
+                        let percentage = (t.confidence * 100.0).round() as u32;
+                        if percentage > 0 {
+                            format!("{} ({}%)", t.label, percentage)
+                        } else {
+                            // For very small confidences, show decimal percentage
+                            format!("{} ({:.2}%)", t.label, t.confidence * 100.0)
+                        }
+                    } else {
+                        t.label
+                    }
+                })
+                .collect();
+        }
+        Err(e) => {
+            progress_bar.set_message(format!("Tagging error: {}", e));
+        }
+    }
+}
+
 fn handle_entry(
     entry: Result<walkdir::DirEntry, walkdir::Error>,
     config: &ScanConfig,
@@ -233,107 +382,38 @@ fn handle_entry(
     classifier: &Option<Arc<Mutex<ImageClassifier>>>,
 ) -> Option<ImageRecord> {
     progress_bar.inc(1);
-    match entry {
-        Ok(entry) => {
-            let mut path = entry.path().to_path_buf();
-            progress_bar.set_message(format!("Scanning: {}", path.display()));
-            if path.is_file() && has_image_extension(&path, &config.extensions) {
-                if config.rename_to_guid {
-                    match ensure_guid_name(&path) {
-                        Ok(new_path) => {
-                            if new_path != path {
-                                progress_bar.set_message(format!(
-                                    "Renamed: {} -> {}",
-                                    path.file_name().unwrap_or_default().to_string_lossy(),
-                                    new_path.file_name().unwrap_or_default().to_string_lossy()
-                                ));
-                            }
-                            path = new_path;
-                        }
-                        Err(error) => {
-                            progress_bar.set_message(format!("Rename error: {}", error));
-                            return None;
-                        }
-                    }
-                }
 
-                match detector.analyze(&path) {
-                    Ok(mut analysis) => {
-                        if let Some(cache) = cache {
-                            match cache.ensure(&path, analysis.features.fingerprint) {
-                                Ok(thumbnail) => {
-                                    analysis.metadata.thumbnail = Some(thumbnail);
-                                }
-                                Err(error) => {
-                                    progress_bar.set_message(format!("Thumbnail error: {}", error));
-                                }
-                            }
-                        }
-
-                        if config.detect_low_resolution {
-                            let (w, h) = analysis.metadata.dimensions;
-                            analysis.metadata.resolution_tier = resolution_tier(w, h);
-                        }
-
-                        // Run AI classification if enabled
-                        if let Some(classifier) = classifier {
-                            if let Ok(mut clf) = classifier.lock() {
-                                // Run moderation
-                                match clf.moderate(&path) {
-                                    Ok(flags) => {
-                                        analysis.metadata.moderation_tier =
-                                            Some(flags.tier.to_string());
-                                    }
-                                    Err(e) => {
-                                        // Log error details but continue scanning
-                                        eprintln!("Moderation classification failed for {}: {}", 
-                                                 path.display(), e);
-                                        progress_bar.set_message(format!(
-                                            "Moderation error: {}",
-                                            e
-                                        ));
-                                    }
-                                }
-
-                                // Run tagging (max 5 tags)
-                                match clf.tag(&path, MAX_TAGS_PER_IMAGE) {
-                                    Ok(tags) => {
-                                        analysis.metadata.tags =
-                                            tags.into_iter().map(|t| {
-                                                if DEBUG_SHOW_TAG_CONFIDENCE {
-                                                    let percentage = (t.confidence * 100.0).round() as u32;
-                                                    if percentage > 0 {
-                                                        format!("{} ({}%)", t.label, percentage)
-                                                    } else {
-                                                        // For very small confidences, show decimal percentage
-                                                        format!("{} ({:.2}%)", t.label, t.confidence * 100.0)
-                                                    }
-                                                } else {
-                                                    t.label
-                                                }
-                                            }).collect();
-                                    }
-                                    Err(e) => {
-                                        progress_bar
-                                            .set_message(format!("Tagging error: {}", e));
-                                    }
-                                }
-                            }
-                        }
-
-                        return Some(ImageRecord { path, analysis });
-                    }
-                    Err(error) => {
-                        progress_bar.set_message(format!("Error: {}", error));
-                    }
-                }
-            }
-        }
+    // Extract and validate entry
+    let entry = match entry {
+        Ok(entry) => entry,
         Err(error) => {
             progress_bar.set_message(format!("Error: {}", error));
+            return None;
+        }
+    };
+
+    let path = entry.path().to_path_buf();
+    progress_bar.set_message(format!("Scanning: {}", path.display()));
+
+    // Check if it's an image file
+    if !path.is_file() || !has_image_extension(&path, &config.extensions) {
+        return None;
+    }
+
+    // Step 1: Validate and optionally rename to GUID format
+    let path = validate_and_maybe_rename(path, config, progress_bar)?;
+
+    // Step 2: Analyze image features (hash, resolution, thumbnail)
+    let mut analysis = analyze_image_features(&path, config, detector, cache, progress_bar)?;
+
+    // Step 3: Run AI classification if enabled
+    if let Some(classifier) = classifier {
+        if let Ok(mut clf) = classifier.lock() {
+            classify_and_tag(&path, &mut clf, &mut analysis.metadata, progress_bar);
         }
     }
-    None
+
+    Some(ImageRecord { path, analysis })
 }
 
 fn has_image_extension(path: &Path, extensions: &[String]) -> bool {

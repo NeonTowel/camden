@@ -1,9 +1,5 @@
 [workspace]
-members = [
-    ".",
-    "camden-frontend",
-    "core",
-]
+members = [".", "camden-frontend", "core"]
 
 [package]
 name = "camden"
