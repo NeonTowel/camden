@@ -50,7 +50,6 @@ struct AppState {
     gallery_photos: Vec<InternalFile>, // Filtered gallery view
     scanning: bool,
     last_scan_duration: Option<std::time::Duration>,
-    archive_path: PathBuf,
     progress_bar: Option<Arc<ProgressBar>>, // Current scan progress bar
 }
 
@@ -385,9 +384,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui_weak.clone();
         ui.on_archive_selected(move || {
             if let Some(ui) = ui_weak.upgrade() {
-                let archive_path = state.lock()
-                    .map(|s| s.archive_path.clone())
-                    .unwrap_or_else(|_| PathBuf::from("archive"));
+                let archive_path_str = ui.get_settings_archive_path().to_string();
+                if archive_path_str.is_empty() {
+                    ui.set_status_text("Please set an archive path in Settings before archiving.".into());
+                    return;
+                }
+                let archive_path = PathBuf::from(archive_path_str);
 
                 let selected: Vec<PathBuf> = state
                     .lock()
