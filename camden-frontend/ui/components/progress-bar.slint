@@ -37,9 +37,10 @@ export component ProgressBar inherits Rectangle {
 
 export component ScanProgress inherits Rectangle {
     in property <bool> scanning: false;
-    in property <float> animation-phase: 0.0;
+    in property <float> progress: 0.0;  // 0.0 to 1.0 for determinate progress
     in property <string> current-file: "";
-    in property <int> files-found: 0;
+    in property <int> files-scanned: 0;
+    in property <int> files-total: 0;
     in property <int> duplicates-found: 0;
     in property <int> low-res-found: 0;
 
@@ -50,8 +51,9 @@ export component ScanProgress inherits Rectangle {
         spacing: 8px;
 
         ProgressBar {
-            indeterminate: true;
-            animation-phase: animation-phase;
+            indeterminate: files-total == 0;
+            progress: progress;
+            animation-phase: progress;  // Use progress for animation fallback
         }
 
         HorizontalLayout {
@@ -85,7 +87,7 @@ export component ScanProgress inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Text {
-                        text: files-found + " files";
+                        text: files-scanned + " / " + files-total + " files";
                         font-size: 9pt;
                         color: white;
                         font-weight: 600;

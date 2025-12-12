@@ -13,7 +13,7 @@ use std::sync::Arc;
 fn main() {
     let command = Command::from_env().unwrap_or_else(|err| {
         match err {
-            cli::CliError::Help => {
+            cli::CliError::Help | cli::CliError::Version => {
                 println!("{}", err);
                 std::process::exit(0);
             }
@@ -40,9 +40,10 @@ fn run_scan(config: CliConfig) {
     let scan_config = ScanConfig::new(config.extensions.clone(), config.threading)
         .with_guid_rename(config.rename_to_guid)
         .with_low_resolution_detection(config.detect_low_resolution)
-        .with_classification(config.enable_classification);
+        .with_classification(config.enable_classification)
+        .with_feature_detection(config.enable_feature_detection);
     
-    let summary = scan(&config.root, &scan_config, &progress_bar);
+    let summary = scan(&config.root, &scan_config, &progress_bar, None);
     progress_bar.finish_with_message("Scan complete");
 
     print_duplicates(&summary);
@@ -83,13 +84,14 @@ fn run_preview(config: PreviewConfig) {
     let mut scan_config = ScanConfig::new(config.extensions.clone(), config.threading)
         .with_guid_rename(config.rename_to_guid)
         .with_low_resolution_detection(config.detect_low_resolution)
-        .with_classification(config.enable_classification);
+        .with_classification(config.enable_classification)
+        .with_feature_detection(config.enable_feature_detection);
     
     if let Some(root) = config.thumbnail_root() {
         scan_config = scan_config.with_thumbnail_root(root.to_path_buf());
     }
 
-    let summary = scan(&config.root, &scan_config, &progress_bar);
+    let summary = scan(&config.root, &scan_config, &progress_bar, None);
     progress_bar.finish_with_message("Preview scan complete");
 
     if config.enable_classification {

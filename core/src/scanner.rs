@@ -1,5 +1,5 @@
 use crate::classifier::{self, ClassifierConfig, ImageClassifier};
-use crate::detector::{DuplicateDetector, ImageAnalysis, ImageFeatures, ImageMetadata};
+use crate::detector::{DetectorConfig, DuplicateDetector, ImageAnalysis, ImageFeatures, ImageMetadata, MatchResult};
 use crate::rename::ensure_guid_name;
 use crate::resolution::{resolution_tier, ResolutionTier};
 use crate::thumbnails::ThumbnailCache;
@@ -31,6 +31,8 @@ pub struct ScanConfig {
     pub detect_low_resolution: bool,
     /// When true, runs AI classification (moderation + tagging) on each image.
     pub enable_classification: bool,
+    /// When true, enables feature-based detection using ORB + RANSAC (finds crops).
+    pub enable_feature_detection: bool,
 }
 
 impl ScanConfig {
@@ -43,6 +45,7 @@ impl ScanConfig {
             rename_to_guid: false,
             detect_low_resolution: false,
             enable_classification: false,
+            enable_feature_detection: false,
         }
     }
 
@@ -63,6 +66,11 @@ impl ScanConfig {
 
     pub fn with_classification(mut self, enabled: bool) -> Self {
         self.enable_classification = enabled;
+        self
+    }
+
+    pub fn with_feature_detection(mut self, enabled: bool) -> Self {
+        self.enable_feature_detection = enabled;
         self
     }
 }
@@ -137,8 +145,18 @@ pub fn count_entries(root: &Path) -> u64 {
     WalkDir::new(root).into_iter().count() as u64
 }
 
-pub fn scan(root: &Path, config: &ScanConfig, progress_bar: &Arc<ProgressBar>) -> ScanSummary {
-    let detector = DuplicateDetector::default();
+pub fn scan(
+    root: &Path,
+    config: &ScanConfig,
+    progress_bar: &Arc<ProgressBar>,
+    phase: Option<&Arc<Mutex<String>>>,
+) -> ScanSummary {
+    // Create detector with feature detection enabled if requested
+    let detector_config = DetectorConfig {
+        enable_feature_detection: config.enable_feature_detection,
+        ..DetectorConfig::default()
+    };
+    let detector = DuplicateDetector::new(detector_config);
     let cache = ThumbnailCache::new(config.thumbnail_cache_root.clone())
         .ok()
         .map(Arc::new);
@@ -167,12 +185,19 @@ pub fn scan(root: &Path, config: &ScanConfig, progress_bar: &Arc<ProgressBar>) -
         None
     };
 
+    // Set initial phase
+    if let Some(phase) = phase {
+        if let Ok(mut p) = phase.lock() {
+            *p = "Scanning files".to_string();
+        }
+    }
+
     let groups = match config.threading {
         ThreadingMode::Parallel => {
-            scan_parallel(root, config, progress_bar, &detector, &cache, &classifier)
+            scan_parallel(root, config, progress_bar, phase, &detector, &cache, &classifier)
         }
         ThreadingMode::Sequential => {
-            scan_sequential(root, config, progress_bar, &detector, &cache, &classifier)
+            scan_sequential(root, config, progress_bar, phase, &detector, &cache, &classifier)
         }
     };
 
@@ -183,6 +208,7 @@ fn scan_parallel(
     root: &Path,
     config: &ScanConfig,
     progress_bar: &Arc<ProgressBar>,
+    phase: Option<&Arc<Mutex<String>>>,
     detector: &DuplicateDetector,
     cache: &Option<Arc<ThumbnailCache>>,
     classifier: &Option<Arc<Mutex<ImageClassifier>>>,
@@ -202,13 +228,15 @@ fn scan_parallel(
             left
         });
 
-    group_records(records, detector)
+    progress_bar.set_message("Grouping duplicates...");
+    group_records(records, detector, progress_bar, phase)
 }
 
 fn scan_sequential(
     root: &Path,
     config: &ScanConfig,
     progress_bar: &Arc<ProgressBar>,
+    phase: Option<&Arc<Mutex<String>>>,
     detector: &DuplicateDetector,
     cache: &Option<Arc<ThumbnailCache>>,
     classifier: &Option<Arc<Mutex<ImageClassifier>>>,
@@ -221,7 +249,8 @@ fn scan_sequential(
             records.push(record);
         }
     }
-    group_records(records, detector)
+    progress_bar.set_message("Grouping duplicates...");
+    group_records(records, detector, progress_bar, phase)
 }
 
 /// Validate and optionally rename a file to GUID format.
@@ -426,12 +455,31 @@ fn has_image_extension(path: &Path, extensions: &[String]) -> bool {
         .unwrap_or(false)
 }
 
-fn group_records(records: Vec<ImageRecord>, detector: &DuplicateDetector) -> Vec<DuplicateGroup> {
+fn group_records(
+    records: Vec<ImageRecord>,
+    detector: &DuplicateDetector,
+    progress_bar: &ProgressBar,
+    phase: Option<&Arc<Mutex<String>>>,
+) -> Vec<DuplicateGroup> {
+    // Update phase for grouping
+    if let Some(phase) = phase {
+        if let Ok(mut p) = phase.lock() {
+            *p = "Grouping by hash".to_string();
+        }
+    }
+
     let mut groups = Vec::new();
     let mut buckets: FxHashMap<u16, Vec<usize>> = FxHashMap::default();
     for record in records {
         insert_record(&mut groups, &mut buckets, record, detector);
     }
+
+    // Phase 2: Merge crop-related groups if feature detection is enabled
+    let groups = if detector.config().enable_feature_detection {
+        merge_crop_groups(groups, detector, progress_bar, phase)
+    } else {
+        groups
+    };
 
     groups
         .into_iter()
@@ -461,6 +509,135 @@ fn group_records(records: Vec<ImageRecord>, detector: &DuplicateDetector) -> Vec
         .collect()
 }
 
+/// Checks if two images could potentially be crop-related based on dimensions.
+/// A crop must fit within the bounds of the original image.
+fn could_be_crop_related(dims_a: (i32, i32), dims_b: (i32, i32)) -> bool {
+    let (w_a, h_a) = dims_a;
+    let (w_b, h_b) = dims_b;
+
+    // One could be a crop of the other if one fits inside the other
+    // Allow some tolerance for slight size differences (e.g., resizing after crop)
+    let tolerance = 1.1; // 10% size tolerance
+
+    // Check if A could be a crop of B (A smaller or equal)
+    let a_in_b = (w_a as f32) <= (w_b as f32 * tolerance) && (h_a as f32) <= (h_b as f32 * tolerance);
+    // Check if B could be a crop of A (B smaller or equal)
+    let b_in_a = (w_b as f32) <= (w_a as f32 * tolerance) && (h_b as f32) <= (h_a as f32 * tolerance);
+
+    a_in_b || b_in_a
+}
+
+/// Merges groups that are crop-related based on ORB feature matching.
+/// This is a post-processing step that compares representative features from each group.
+/// Uses parallel processing for dramatic speedup on multi-core CPUs.
+fn merge_crop_groups(
+    mut groups: Vec<GroupState>,
+    detector: &DuplicateDetector,
+    progress_bar: &ProgressBar,
+    phase: Option<&Arc<Mutex<String>>>,
+) -> Vec<GroupState> {
+    if groups.len() < 2 {
+        return groups;
+    }
+
+    // Update phase for feature matching
+    if let Some(phase) = phase {
+        if let Ok(mut p) = phase.lock() {
+            *p = "Matching crops".to_string();
+        }
+    }
+
+    // Pre-filter: only compare groups that could potentially be crops
+    // Build list of candidate pairs based on dimension compatibility
+    let mut candidate_pairs: Vec<(usize, usize)> = Vec::new();
+    for i in 0..groups.len() {
+        // Skip groups without visual features
+        if groups[i].features.visual.is_none() {
+            continue;
+        }
+        let dims_i = groups[i].features.visual.as_ref().unwrap().source_dimensions;
+
+        for j in (i + 1)..groups.len() {
+            if groups[j].features.visual.is_none() {
+                continue;
+            }
+            let dims_j = groups[j].features.visual.as_ref().unwrap().source_dimensions;
+
+            // Only compare if dimensions suggest possible crop relationship
+            if could_be_crop_related(dims_i, dims_j) {
+                candidate_pairs.push((i, j));
+            }
+        }
+    }
+
+    let total_comparisons = candidate_pairs.len();
+    progress_bar.set_length(total_comparisons as u64);
+    progress_bar.set_position(0);
+    let msg = format!("Matching {} candidate pairs...", total_comparisons);
+    progress_bar.set_message(msg);
+
+    if candidate_pairs.is_empty() {
+        return groups;
+    }
+
+    // Parallel comparison using rayon
+    // Returns a list of (i, j) pairs that are crop matches
+    let progress_counter = std::sync::atomic::AtomicU64::new(0);
+    let crop_matches: Vec<(usize, usize)> = candidate_pairs
+        .par_iter()
+        .filter_map(|&(i, j)| {
+            // Update progress periodically
+            let count = progress_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if count % 100 == 0 {
+                progress_bar.set_position(count);
+            }
+
+            // Check if these groups are crop-related using feature matching
+            let match_result = detector.is_match(&groups[i].features, &groups[j].features);
+            if match_result == MatchResult::CropMatch {
+                Some((i, j))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    progress_bar.set_position(total_comparisons as u64);
+    progress_bar.set_message("Merging matched groups...");
+
+    // Build merge map from parallel results
+    let mut merge_into: Vec<Option<usize>> = vec![None; groups.len()];
+    for (i, j) in crop_matches {
+        // If j is not already merged elsewhere, merge into i
+        if merge_into[j].is_none() && merge_into[i].is_none() {
+            merge_into[j] = Some(i);
+        } else if merge_into[j].is_none() {
+            // i is already merged somewhere, follow the chain
+            let mut target = i;
+            while let Some(t) = merge_into[target] {
+                target = t;
+            }
+            merge_into[j] = Some(target);
+        }
+    }
+
+    // Apply merges: collect entries from groups marked for merging
+    // Process in reverse to avoid index invalidation issues
+    for j in (0..groups.len()).rev() {
+        if let Some(target) = merge_into[j] {
+            // Move entries from group j to group target
+            let entries_to_move = std::mem::take(&mut groups[j].entries);
+            groups[target].entries.extend(entries_to_move);
+        }
+    }
+
+    // Filter out empty groups (those that were merged into others)
+    groups
+        .into_iter()
+        .filter(|g| !g.entries.is_empty())
+        .collect()
+}
+
 fn insert_record(
     groups: &mut Vec<GroupState>,
     buckets: &mut FxHashMap<u16, Vec<usize>>,
@@ -470,6 +647,8 @@ fn insert_record(
     let ImageRecord { path, analysis } = record;
     let ImageAnalysis { features, metadata } = analysis;
     let bucket = bucket_id(features.fingerprint);
+
+    // Fast hash-based check via bucket lookup
     if let Some(indices) = buckets.get(&bucket) {
         for &index in indices {
             if detector.is_similar(&groups[index].features, &features) {
@@ -482,9 +661,10 @@ fn insert_record(
         }
     }
 
-    for (index, group) in groups.iter_mut().enumerate() {
+    // Check all groups for hash match (different bucket but similar hash)
+    for (index, group) in groups.iter().enumerate() {
         if detector.is_similar(&group.features, &features) {
-            group.entries.push(AnalyzedFile {
+            groups[index].entries.push(AnalyzedFile {
                 path: path.clone(),
                 metadata: metadata.clone(),
             });
@@ -493,6 +673,7 @@ fn insert_record(
         }
     }
 
+    // No hash match found - create new group
     let index = groups.len();
     groups.push(GroupState {
         features,
@@ -560,7 +741,7 @@ mod tests {
         let progress = Arc::new(ProgressBar::hidden());
         let config = ScanConfig::new(vec![String::from("jpg"), String::from("png")], mode)
             .with_thumbnail_root(thumb_dir.path().to_path_buf());
-        let summary = scan(dir.path(), &config, &progress);
+        let summary = scan(dir.path(), &config, &progress, None);
         let duplicates: Vec<_> = summary.duplicate_groups().collect();
         assert_eq!(duplicates.len(), 1);
         let files = &duplicates[0].files;

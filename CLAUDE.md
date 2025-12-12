@@ -1,83 +1,55 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for working with this Rust workspace.
 
-## Quick Reference
+## Build & Development
 
-See **AGENTS.md** for complete guidelines on commands, architecture, code style, and workflow principles. This file supplements AGENTS.md with additional context.
+Always use `task` commands (not direct cargo) to load environment variables:
 
-## Build Commands
-
-Always use `task` commands (not direct cargo) to load vcpkg/OpenCV environment variables:
-
-| Command | Description |
-|---------|-------------|
-| `task check` | Analyze workspace with cargo check |
-| `task build` | Debug build (static OpenCV via vcpkg) |
-| `task release` | Optimized release build |
-| `task test` | Run all tests |
-| `task fmt` | Format with rustfmt |
+| Command | Purpose |
+|---------|---------|
+| `task check` | Workspace analysis |
+| `task build` | Debug build |
+| `task release` | Optimized build |
+| `task test` | Run tests |
+| `task fmt` | Format code |
 | `task frontend` | Launch Slint GUI |
-| `task run CLI_ARGS="--help"` | Run CLI with arguments |
-
-### Dependency Setup
-- `task deps` - Install dev dependencies (scoop, vcpkg)
-- `task install-opencv-static` - Build OpenCV statically
-- `task deps-onnxruntime` - Download ONNX Runtime
-- `task deps-models-hf` - Download AI models from Hugging Face (no Python required)
 
 ## Project Structure
 
 Three-crate Rust workspace:
-- **camden** (src/) - CLI binary, command dispatch
-- **camden-core** (core/) - Scanner, detector, operations, classifier, thumbnails
-- **camden-frontend** - Slint GUI application
+- **camden** (src/) - CLI binary with command dispatch, uses `indicatif` progress bars
+- **camden-core** (core/) - Scanner, detector, classifier, operations, snapshots, thumbnails
+- **camden-frontend** - Slint-based GUI application
 
-## AI Classification (Feature-Gated)
+Dependencies: OpenCV (image processing), xxHash (checksums), rayon (parallelism)
 
-The `classification` feature (default-on) enables AI-powered image analysis:
+## Critical Directives
 
-- **core/src/classifier/** - ONNX Runtime inference for moderation and tagging
-- **Models** stored in `.vendor/models/` (ONNX format)
-- **Configuration** via `camden-classifier.toml` (see example file)
+### CLI/Frontend Parity (MANDATORY)
+When implementing new features, ensure both CLI and frontend remain in sync:
+- CLI flags should mirror frontend UI options (e.g., `--enable-classification` ↔ checkbox)
+- Use shared `ScanConfig` builder from `camden-core` for both
+- Standard flags: `--rename-to-guid`, `--detect-low-resolution`, `--enable-classification`
+- Test features in both interfaces before considering implementation complete
+- UX must feel consistent: same defaults, behavior, output formats
 
-Default models:
-- MobileNetV2-12 (tagging) - ImageNet 1000 classes
-- GantMan NSFW (moderation) - 5-class content safety
+### Code Style (Rust)
+- Edition 2021, format with `rustfmt`, lint with `clippy`
+- Use `Result<T, E>` with `?` operator; **no `panic!` for recoverable errors**
+- Prefer immutability; use `thiserror`/`anyhow` for error types
+- Keep modules small and focused; document public APIs with `///` doc comments
+- Naming: snake_case (functions/variables), PascalCase (types), SCREAMING_SNAKE (constants)
 
-Tensor layouts vary by model - check `layout` field in config (NCHW vs NHWC).
+### Development Workflow
+- Ground yourself in context before coding: understand configs, dependencies, and requirements
+- Challenge assumptions upfront: clarify inputs, outputs, constraints, and UX/maintainability impacts
+- Keep code modular, testable, DRY, and idiomatic; use self-documenting patterns
+- Think beyond single files: align frontend, backend, and tooling interactions
+- Watch for scope creep before executing
 
-## Key Patterns
-
-### CLI/Frontend Parity (Critical)
-Features must work identically in both CLI and Slint frontend. Use shared `ScanConfig` builder from camden-core:
-```rust
-ScanConfig::new(extensions, threading_mode)
-    .with_guid_rename(bool)
-    .with_low_resolution_detection(bool)
-    .with_classification(bool)
-```
-
-### Error Handling
-- Use `Result<T, E>` with `?` propagation
-- No `panic!` for recoverable errors
-- `thiserror`/`anyhow` for error types
-
-### Outputs
-- `identical_files.json` - Duplicate scan results
-- `.camden-classifications.json` - AI classification results
-
-## Environment (Windows)
-
-Static OpenCV build requires vcpkg environment. The `.env` file sets:
-- `VCPKG_ROOT`, `OPENCV_DIR`, `OPENCV_LINK_PATHS`
-- `VCPKGRS_TRIPLET=x64-windows-static-md`
-
-Vendor directory (`.vendor/`) contains vcpkg, onnxruntime, and models.
-
-## Documentation
-
-- **AGENTS.md** - Developer guidelines and workflow
-- **docs/AI-MODELS.md** - Model selection, configuration, conversion
-- **docs/SETUP-WINDOWS.md** - Windows setup guide
-- **MODERATION-DEBUGGING.md** - Troubleshooting content moderation
+### AI Classification
+The `classification` feature (default-on) uses ONNX Runtime:
+- Models in `.vendor/models/` (ONNX format)
+- Configuration via `camden-classifier.toml`
+- Check `layout` field (NCHW vs NHWC) for tensor compatibility

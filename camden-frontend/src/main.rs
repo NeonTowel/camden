@@ -51,6 +51,7 @@ struct AppState {
     scanning: bool,
     last_scan_duration: Option<std::time::Duration>,
     progress_bar: Option<Arc<ProgressBar>>, // Current scan progress bar
+    scan_phase: Option<Arc<Mutex<String>>>, // Current scan phase message
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -133,25 +134,32 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let state_clone = Arc::clone(&state);
         let ui_weak_clone = ui_weak.clone();
-        progress_timer.start(TimerMode::Repeated, std::time::Duration::from_millis(100), move || {
+        progress_timer.start(TimerMode::Repeated, std::time::Duration::from_millis(200), move || {
             if let Ok(state_guard) = state_clone.lock() {
                 if let Some(progress_bar) = &state_guard.progress_bar {
                     let pos = progress_bar.position();
                     let len = progress_bar.length().unwrap_or(0);
 
-                    if let Some(ui) = ui_weak_clone.upgrade() {
-                        // Update files found counter
-                        ui.set_files_found(len as i32);
+                    // Get current phase message
+                    let phase_msg = state_guard.scan_phase.as_ref()
+                        .and_then(|p| p.lock().ok())
+                        .map(|s| s.clone())
+                        .unwrap_or_else(|| "Scanning".to_string());
 
-                        // Update progress phase (0.0 to 1.0)
+                    if let Some(ui) = ui_weak_clone.upgrade() {
+                        // Update file counters
+                        ui.set_files_scanned(pos as i32);
+                        ui.set_files_total(len as i32);
+
+                        // Update progress (0.0 to 1.0)
                         if len > 0 {
-                            let phase = pos as f32 / len as f32;
-                            ui.set_progress_phase(phase);
+                            let progress = pos as f32 / len as f32;
+                            ui.set_scan_progress(progress);
                         }
 
-                        // Update status text with progress
+                        // Update status text with phase and progress
                         if len > 0 {
-                            ui.set_status_text(format!("Scanning: {} of {} files processed", pos, len).into());
+                            ui.set_status_text(format!("{}: {} / {}", phase_msg, pos, len).into());
                         }
                     }
                 }
@@ -181,13 +189,16 @@ fn main() -> Result<(), slint::PlatformError> {
                     state_mut.last_scan_duration = None;
                 }
                 ui.set_scanning(true);
-                ui.set_progress_phase(0.0);
+                ui.set_scan_progress(0.0);
+                ui.set_files_scanned(0);
+                ui.set_files_total(0);
                 ui.set_status_text("Scanning…".into());
 
                 let rename_to_guid = ui.get_rename_to_guid();
                 let detect_low_resolution = ui.get_detect_low_resolution();
                 let enable_classification = ui.get_enable_classification();
-                let config = build_scan_config(rename_to_guid, detect_low_resolution, enable_classification);
+                let enable_feature_detection = ui.get_enable_feature_detection();
+                let config = build_scan_config(rename_to_guid, detect_low_resolution, enable_classification, enable_feature_detection);
 
                 let ui_weak = ui_weak.clone();
                 let state = Arc::clone(&state);
@@ -555,12 +566,16 @@ fn perform_scan(
     );
     progress_bar.set_message("Scanning");
 
-    // Store progress bar in state so UI can poll it
+    // Create a phase string for communicating scan stage to UI
+    let scan_phase = Arc::new(Mutex::new("Scanning files".to_string()));
+
+    // Store progress bar and phase in state so UI can poll it
     if let Ok(mut state_mut) = state.lock() {
         state_mut.progress_bar = Some(Arc::clone(&progress_bar));
+        state_mut.scan_phase = Some(Arc::clone(&scan_phase));
     }
 
-    let summary = scan(&root, &config, &progress_bar);
+    let summary = scan(&root, &config, &progress_bar, Some(&scan_phase));
     let groups = map_summary(&summary);
     let duration = start_time.elapsed();
 
@@ -582,6 +597,7 @@ fn perform_scan(
         state_mut.scanning = false;
         state_mut.last_scan_duration = Some(duration);
         state_mut.progress_bar = None; // Clear progress bar
+        state_mut.scan_phase = None; // Clear scan phase
     }
 
     let duplicate_count = summary.duplicate_groups().count();
@@ -707,7 +723,7 @@ fn refresh_ui(ui: &MainWindow, state: &AppState, status_override: Option<String>
 
     ui.set_scanning(state.scanning);
     if !state.scanning {
-        ui.set_progress_phase(0.0);
+        ui.set_scan_progress(0.0);
     }
 
     let status = status_override.unwrap_or_else(|| format_status(state));
@@ -1213,7 +1229,7 @@ fn format_status(state: &AppState) -> String {
     )
 }
 
-fn build_scan_config(rename_to_guid: bool, detect_low_resolution: bool, enable_classification: bool) -> ScanConfig {
+fn build_scan_config(rename_to_guid: bool, detect_low_resolution: bool, enable_classification: bool, enable_feature_detection: bool) -> ScanConfig {
     let mut config = ScanConfig::new(default_extensions(), ThreadingMode::Parallel);
     if let Some(mut dir) = dirs::data_local_dir() {
         dir.push("Camden");
@@ -1224,6 +1240,7 @@ fn build_scan_config(rename_to_guid: bool, detect_low_resolution: bool, enable_c
         .with_guid_rename(rename_to_guid)
         .with_low_resolution_detection(detect_low_resolution)
         .with_classification(enable_classification)
+        .with_feature_detection(enable_feature_detection)
 }
 
 fn default_extensions() -> Vec<String> {

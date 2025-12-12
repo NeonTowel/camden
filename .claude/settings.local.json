@@ -24,7 +24,10 @@
       "Bash(cargo clean:*)",
       "Bash(./target/release/camden.exe:*)",
       "Bash(cargo doc:*)",
-      "Bash(1)"
+      "Bash(1)",
+      "Bash(task version)",
+      "Bash(task sync-cargo-versions:*)",
+      "Bash(task bump-patch)"
     ],
     "deny": [
       "Bash(python:*)",

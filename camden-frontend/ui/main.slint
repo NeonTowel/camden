@@ -52,12 +52,14 @@ export component MainWindow inherits Window {
     in-out property <string> root_path: "";
     in-out property <string> target_path: "";
     in-out property <bool> scanning: false;
-    in-out property <float> progress_phase: 0.0;
+    in-out property <float> scan_progress: 0.0;  // 0.0 to 1.0
     in-out property <bool> rename_to_guid: false;
     in-out property <bool> detect_low_resolution: true;
     in-out property <bool> enable_classification: true;
+    in-out property <bool> enable_feature_detection: false;
     in-out property <string> current_scan_file: "";
-    in-out property <int> files_found: 0;
+    in-out property <int> files_scanned: 0;
+    in-out property <int> files_total: 0;
     in-out property <int> duplicates_found: 0;
     in-out property <int> low_res_found: 0;
     in-out property <string> last_scan_summary: "";
@@ -173,11 +175,13 @@ export component MainWindow inherits Window {
                 find-duplicates: true;
                 classify-images <=> enable_classification;
                 detect-low-res <=> detect_low_resolution;
+                feature-detection <=> enable_feature_detection;
                 rename-to-guid <=> rename_to_guid;
                 scanning: scanning;
-                progress-phase: progress_phase;
+                progress: scan_progress;
                 current-file: current_scan_file;
-                files-found: files_found;
+                files-scanned: files_scanned;
+                files-total: files_total;
                 duplicates-found: duplicates_found;
                 low-res-found: low_res_found;
                 last-scan-summary: last_scan_summary;
@@ -273,15 +277,4 @@ export component MainWindow inherits Window {
         }
     }
 
-    // Progress animation timer (runs when scanning)
-    Timer {
-        interval: 24ms;
-        running: scanning;
-        triggered => {
-            progress_phase = progress_phase + 0.02;
-            if progress_phase > 1.0 {
-                progress_phase = 0.0;
-            }
-        }
-    }
 }

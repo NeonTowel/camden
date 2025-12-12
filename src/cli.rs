@@ -19,6 +19,7 @@ pub struct CliConfig {
     pub rename_to_guid: bool,
     pub detect_low_resolution: bool,
     pub enable_classification: bool,
+    pub enable_feature_detection: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub struct PreviewConfig {
     pub rename_to_guid: bool,
     pub detect_low_resolution: bool,
     pub enable_classification: bool,
+    pub enable_feature_detection: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -39,6 +41,7 @@ pub enum CliError {
     MissingOutput,
     InvalidFlag(String),
     Help,
+    Version,
 }
 
 impl Command {
@@ -52,6 +55,7 @@ impl Command {
     {
         let mut args = args.into_iter();
         match args.next() {
+            Some(first) if first == "--version" || first == "-V" => Err(CliError::Version),
             Some(first) if first == "--help" || first == "-h" => Err(CliError::Help),
             Some(first) if first == "preview-scan" => {
                 PreviewConfig::parse(args).map(Command::Preview)
@@ -84,6 +88,7 @@ impl CliConfig {
         let mut rename_to_guid = false;
         let mut detect_low_resolution = false;
         let mut enable_classification = false;
+        let mut enable_feature_detection = false;
 
         for arg in args.by_ref() {
             if arg.starts_with("--") {
@@ -101,6 +106,10 @@ impl CliConfig {
                 }
                 if arg == "--enable-classification" || arg == "--classify" {
                     enable_classification = true;
+                    continue;
+                }
+                if arg == "--enable-feature-detection" || arg == "--feature-detection" {
+                    enable_feature_detection = true;
                     continue;
                 }
                 if let Some(value) = arg.strip_prefix("--target=") {
@@ -137,6 +146,7 @@ impl CliConfig {
             rename_to_guid,
             detect_low_resolution,
             enable_classification,
+            enable_feature_detection,
         })
     }
 }
@@ -153,6 +163,7 @@ impl PreviewConfig {
         let mut rename_to_guid = false;
         let mut detect_low_resolution = false;
         let mut enable_classification = false;
+        let mut enable_feature_detection = false;
 
         for arg in args.by_ref() {
             if arg.starts_with("--") {
@@ -170,6 +181,10 @@ impl PreviewConfig {
                 }
                 if arg == "--enable-classification" || arg == "--classify" {
                     enable_classification = true;
+                    continue;
+                }
+                if arg == "--enable-feature-detection" || arg == "--feature-detection" {
+                    enable_feature_detection = true;
                     continue;
                 }
                 if let Some(value) = arg.strip_prefix("--root=") {
@@ -214,6 +229,7 @@ impl PreviewConfig {
             rename_to_guid,
             detect_low_resolution,
             enable_classification,
+            enable_feature_detection,
         })
     }
 
@@ -229,12 +245,14 @@ impl Display for CliError {
             Self::MissingOutput => write!(f, "snapshot output path is required"),
             Self::InvalidFlag(flag) => write!(f, "unrecognized argument: {}", flag),
             Self::Help => write!(f, "{}", help_text()),
+            Self::Version => write!(f, "{}", env!("CAMDEN_VERSION_FULL")),
         }
     }
 }
 
-fn help_text() -> &'static str {
-    r#"Camden - Image Duplicate Finder
+fn help_text() -> String {
+    format!(
+        r#"Camden - Image Duplicate Finder {}
 
 USAGE:
     camden <ROOT> [TARGET] [OPTIONS]
@@ -262,14 +280,20 @@ COMMON OPTIONS:
     --detect-low-resolution     Flag low-resolution images
     --enable-classification     Enable AI image classification
     --classify                  Alias for --enable-classification
+    --enable-feature-detection  Enable feature-based detection for crops (slower)
+    --feature-detection         Alias for --enable-feature-detection
     -h, --help                  Show this help message
+    -V, --version               Show version information
 
 EXAMPLES:
     camden ./photos
     camden ./photos ./duplicates --enable-classification
     camden --root=./images --target=./dupes --detect-low-resolution
     camden preview-scan ./photos --classify --thumbnail-root=./thumbs
-"#
+    camden ./photos --enable-feature-detection
+"#,
+        env!("CAMDEN_VERSION_FULL")
+    )
 }
 
 impl Error for CliError {}
@@ -300,6 +324,7 @@ mod tests {
                 assert!(!config.rename_to_guid);
                 assert!(!config.detect_low_resolution);
                 assert!(!config.enable_classification);
+                assert!(!config.enable_feature_detection);
             }
             _ => panic!("expected scan command"),
         }

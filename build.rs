@@ -2,11 +2,9 @@ use std::fs;
 use std::path::Path;
 
 fn main() {
-    slint_build::compile("ui/main.slint").expect("Failed to compile Slint UI");
+    let version_path = Path::new("VERSION.toml");
 
-    // Version embedding from VERSION.toml
-    let version_path = Path::new("../VERSION.toml");
-    println!("cargo:rerun-if-changed=../VERSION.toml");
+    println!("cargo:rerun-if-changed=VERSION.toml");
 
     if let Ok(content) = fs::read_to_string(version_path) {
         let major = parse_field(&content, "major").unwrap_or(0);

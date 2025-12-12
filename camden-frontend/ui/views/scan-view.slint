@@ -13,13 +13,15 @@ export component ScanView inherits Rectangle {
     in-out property <bool> find-duplicates: true;
     in-out property <bool> classify-images: true;
     in-out property <bool> detect-low-res: true;
+    in-out property <bool> feature-detection: false;
     in-out property <bool> rename-to-guid: false;
 
     // Scan state
     in property <bool> scanning: false;
-    in property <float> progress-phase: 0.0;
+    in property <float> progress: 0.0;  // 0.0 to 1.0
     in property <string> current-file: "";
-    in property <int> files-found: 0;
+    in property <int> files-scanned: 0;
+    in property <int> files-total: 0;
     in property <int> duplicates-found: 0;
     in property <int> low-res-found: 0;
 
@@ -179,6 +181,12 @@ export component ScanView inherits Rectangle {
                         }
 
                         CheckBox {
+                            text: "Feature detection (crops)";
+                            checked <=> feature-detection;
+                            enabled: !scanning;
+                        }
+
+                        CheckBox {
                             text: "Rename files to GUID";
                             checked <=> rename-to-guid;
                             enabled: !scanning;
@@ -206,6 +214,7 @@ export component ScanView inherits Rectangle {
                     find-duplicates = true;
                     classify-images = true;
                     detect-low-res = true;
+                    feature-detection = true;
                 }
             }
 
@@ -216,6 +225,7 @@ export component ScanView inherits Rectangle {
                     find-duplicates = true;
                     classify-images = false;
                     detect-low-res = false;
+                    feature-detection = true;
                 }
             }
 
@@ -226,6 +236,7 @@ export component ScanView inherits Rectangle {
                     find-duplicates = true;
                     classify-images = false;
                     detect-low-res = true;
+                    feature-detection = false;
                 }
             }
         }
@@ -233,9 +244,10 @@ export component ScanView inherits Rectangle {
         // Scan Progress
         ScanProgress {
             scanning: scanning;
-            animation-phase: progress-phase;
+            progress: progress;
             current-file: current-file;
-            files-found: files-found;
+            files-scanned: files-scanned;
+            files-total: files-total;
             duplicates-found: duplicates-found;
             low-res-found: low-res-found;
         }

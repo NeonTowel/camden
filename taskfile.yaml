@@ -542,6 +542,116 @@ tasks:
         echo "Installing static OpenCV..."
         .\\vcpkg.exe install opencv:x64-windows-static
 
+  # ============ VERSION MANAGEMENT ============
+
+  version:
+    desc: Display current version
+    silent: true
+    cmds:
+      - |
+        if [ -f "VERSION.toml" ]; then
+          MAJOR=$(grep 'major' VERSION.toml | sed 's/[^0-9]*//g')
+          MINOR=$(grep 'minor' VERSION.toml | sed 's/[^0-9]*//g')
+          PATCH=$(grep 'patch' VERSION.toml | sed 's/[^0-9]*//g')
+          BUILD=$(grep 'build' VERSION.toml | sed 's/[^0-9]*//g')
+          echo "v${MAJOR}.${MINOR}.${PATCH} (build ${BUILD})"
+        else
+          echo "VERSION.toml not found"
+          exit 1
+        fi
+
+  sync-cargo-versions:
+    desc: Sync VERSION.toml version to all Cargo.toml files
+    silent: true
+    cmds:
+      - |
+        MAJOR=$(grep 'major' VERSION.toml | sed 's/[^0-9]*//g')
+        MINOR=$(grep 'minor' VERSION.toml | sed 's/[^0-9]*//g')
+        PATCH=$(grep 'patch' VERSION.toml | sed 's/[^0-9]*//g')
+        VERSION="${MAJOR}.${MINOR}.${PATCH}"
+
+        # Update root Cargo.toml (camden CLI)
+        sed -i "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"${VERSION}\"/" Cargo.toml
+
+        # Update camden-core
+        sed -i "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"${VERSION}\"/" core/Cargo.toml
+
+        # Update camden-frontend
+        sed -i "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"${VERSION}\"/" camden-frontend/Cargo.toml
+
+        echo "Cargo.toml files synced to version ${VERSION}"
+
+  bump-build:
+    desc: Increment build number (for development builds)
+    silent: true
+    cmds:
+      - |
+        if [ ! -f "VERSION.toml" ]; then
+          echo "VERSION.toml not found, creating..."
+          echo "[version]" > VERSION.toml
+          echo "major = 0" >> VERSION.toml
+          echo "minor = 1" >> VERSION.toml
+          echo "patch = 0" >> VERSION.toml
+          echo "build = 0" >> VERSION.toml
+        fi
+
+        # Read current build number
+        BUILD=$(grep 'build' VERSION.toml | sed 's/[^0-9]*//g')
+        NEW_BUILD=$((BUILD + 1))
+
+        # Update VERSION.toml
+        sed -i "s/build = ${BUILD}/build = ${NEW_BUILD}/" VERSION.toml
+
+        echo "Build number bumped: ${BUILD} -> ${NEW_BUILD}"
+      - task: sync-cargo-versions
+
+  bump-patch:
+    desc: Increment patch version (0.0.X) and reset build number
+    silent: true
+    cmds:
+      - |
+        PATCH=$(grep 'patch' VERSION.toml | sed 's/[^0-9]*//g')
+        NEW_PATCH=$((PATCH + 1))
+
+        sed -i "s/patch = ${PATCH}/patch = ${NEW_PATCH}/" VERSION.toml
+        sed -i "s/build = .*/build = 1/" VERSION.toml
+
+        echo "Patch version bumped: ${PATCH} -> ${NEW_PATCH}, build reset to 1"
+      - task: sync-cargo-versions
+
+  bump-minor:
+    desc: Increment minor version (0.X.0) and reset patch/build
+    silent: true
+    cmds:
+      - |
+        MINOR=$(grep 'minor' VERSION.toml | sed 's/[^0-9]*//g')
+        NEW_MINOR=$((MINOR + 1))
+
+        sed -i "s/minor = ${MINOR}/minor = ${NEW_MINOR}/" VERSION.toml
+        sed -i "s/patch = .*/patch = 0/" VERSION.toml
+        sed -i "s/build = .*/build = 1/" VERSION.toml
+
+        echo "Minor version bumped: ${MINOR} -> ${NEW_MINOR}"
+      - task: sync-cargo-versions
+
+  bump-major:
+    desc: Increment major version (X.0.0) and reset minor/patch/build
+    silent: true
+    cmds:
+      - |
+        MAJOR=$(grep 'major' VERSION.toml | sed 's/[^0-9]*//g')
+        NEW_MAJOR=$((MAJOR + 1))
+
+        sed -i "s/major = ${MAJOR}/major = ${NEW_MAJOR}/" VERSION.toml
+        sed -i "s/minor = .*/minor = 0/" VERSION.toml
+        sed -i "s/patch = .*/patch = 0/" VERSION.toml
+        sed -i "s/build = .*/build = 1/" VERSION.toml
+
+        echo "Major version bumped: ${MAJOR} -> ${NEW_MAJOR}"
+      - task: sync-cargo-versions
+
+  # ============ BUILD/CHECK/TEST ============
+
   check:
     silent: true
     cmds:
@@ -562,15 +672,17 @@ tasks:
       - cargo run -p camden-frontend
 
   build:
-    desc: Build with static OpenCV (using local vcpkg)
+    desc: Build with static OpenCV (bumps build number)
     silent: true
     cmds:
+      - task: bump-build
       - cargo build --workspace
 
   release:
-    desc: Release build with static OpenCV (using local vcpkg)
+    desc: Release build with static OpenCV (bumps patch version)
     silent: true
     cmds:
+      - task: bump-patch
       - cargo build --workspace --release
 
   run:

@@ -1,11 +1,11 @@
 [package]
 name = "camden-core"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
 indicatif = "0.17.3"
-opencv = { version = "0.97", default-features = false, features = ["imgcodecs", "imgproc"] }
+opencv = { version = "0.97", default-features = false, features = ["imgcodecs", "imgproc", "features2d", "calib3d"] }
 rayon = "1.5"
 rustc-hash = "1.1"
 serde = { version = "1.0", features = ["derive"] }
