@@ -9,6 +9,7 @@ import { Theme } from "components/theme.slint";
 // Import components
 import { TabBar } from "components/tab-bar.slint";
 import { PhotoData } from "components/photo-card.slint";
+import { PreviewModal } from "components/preview-modal.slint";
 
 // Import views
 import { ScanView } from "views/scan-view.slint";
@@ -37,10 +38,13 @@ export struct GroupData {
 }
 
 export component MainWindow inherits Window {
-    width: 1200px;
-    height: 800px;
+    width: 1400px;
+    height: 900px;
     title: "Camden Photo Manager";
     background: Theme.colors.bg_primary;
+
+    // Store window dimensions for responsive layouts
+    property <length> content_width: self.width;
 
     // Navigation state
     in-out property <int> active-tab: 0;
@@ -53,10 +57,11 @@ export component MainWindow inherits Window {
     in-out property <string> target_path: "";
     in-out property <bool> scanning: false;
     in-out property <float> scan_progress: 0.0;  // 0.0 to 1.0
+    in-out property <bool> find_duplicates: true;
     in-out property <bool> rename_to_guid: false;
     in-out property <bool> detect_low_resolution: true;
-    in-out property <bool> enable_classification: true;
-    in-out property <bool> enable_feature_detection: false;
+    in-out property <bool> enable_classification: false;
+    in-out property <bool> enable_feature_detection: true;
     in-out property <string> current_scan_file: "";
     in-out property <int> files_scanned: 0;
     in-out property <int> files_total: 0;
@@ -74,6 +79,7 @@ export component MainWindow inherits Window {
         reclaimable_mb: 0.0,
         selected_count: 0,
     };
+    in-out property <float> zoom_level: 100.0;
 
     // ===== GALLERY VIEW PROPERTIES =====
     in-out property <[PhotoData]> gallery_photos: [];
@@ -107,6 +113,23 @@ export component MainWindow inherits Window {
     in-out property <float> settings_cache_size_mb: 0.0;
     in-out property <int> settings_cached_thumbnails: 0;
 
+    // ===== PREVIEW MODAL PROPERTIES =====
+    in property <bool> show_preview_modal: false;
+    in property <PhotoData> preview_photo: {
+        id: -1,
+        display_name: "",
+        info: "",
+        thumbnail: @image-url(""),
+        selected: false,
+        resolution_tier: 0,
+        orientation: 0,
+        moderation_tier: "",
+        tags: "",
+        aspect_ratio: "",
+        is_keep_candidate: false,
+        group_id: -1,
+    };
+
     // ===== LEGACY PROPERTIES (for backward compatibility) =====
     in-out property <[GroupData]> groups: [];
     in-out property <string> status_text: "";
@@ -136,6 +159,10 @@ export component MainWindow inherits Window {
     callback gallery_archive_selected();
     callback gallery_select_all();
     callback gallery_deselect_all();
+
+    // Preview modal callbacks
+    callback preview_show_photo(int);
+    callback preview_close();
 
     // Settings view callbacks
     callback browse_archive_path();
@@ -171,8 +198,7 @@ export component MainWindow inherits Window {
             // Scan View (tab 0)
             if active-tab == 0 : ScanView {
                 root-path <=> root_path;
-                archive-path <=> target_path;
-                find-duplicates: true;
+                find-duplicates <=> find_duplicates;
                 classify-images <=> enable_classification;
                 detect-low-res <=> detect_low_resolution;
                 feature-detection <=> enable_feature_detection;
@@ -188,14 +214,17 @@ export component MainWindow inherits Window {
                 last-scan-duration: last_scan_duration;
 
                 browse-root => { browse_root(); }
-                browse-archive => { browse_target(); }
                 start-scan => { scan_requested(); }
             }
 
             // Duplicates View (tab 1)
             if active-tab == 1 : DuplicatesView {
+                width: 100%;
+                height: 100%;
                 groups: duplicate_groups;
                 stats: duplicate_stats;
+                zoom-level <=> zoom_level;
+                parent_width: content_width;
 
                 file-toggled(gi, fi) => { file_toggled(gi, fi); }
                 select-all-best => { select_all_best(); }
@@ -206,6 +235,8 @@ export component MainWindow inherits Window {
 
             // Gallery View (tab 2)
             if active-tab == 2 : GalleryView {
+                width: 100%;
+                height: 100%;
                 photos: gallery_photos;
                 stats: gallery_stats;
                 show-landscape <=> filter_show_landscape;
@@ -274,6 +305,12 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                 }
             }
+        }
+
+        // Preview modal overlay
+        if show_preview_modal : PreviewModal {
+            photo: preview_photo;
+            close-requested => { preview_close(); }
         }
     }
 

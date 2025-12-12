@@ -25,10 +25,17 @@ export struct DuplicateStats {
 component DuplicateGroupCard inherits Rectangle {
     in property <DuplicateGroup> group;
     in property <int> group-index;
+    in property <float> zoom-level: 100.0;
 
     callback file-toggled(int, int);
     callback select-best(int);
     callback archive-others(int);
+
+    // Responsive card sizing - base 160px with zoom
+    property <length> card_base_width: 160px;
+    property <length> card_base_height: 260px;
+    property <length> card_display_width: (card_base_width / 1px) * (zoom-level / 100.0) * 1px;
+    property <length> card_display_height: (card_base_height / 1px) * (zoom-level / 100.0) * 1px;
 
     border-radius: 8px;
     border-width: 1px;
@@ -101,24 +108,36 @@ component DuplicateGroupCard inherits Rectangle {
             }
         }
 
-        // Files grid
-        HorizontalLayout {
-            spacing: 12px;
+        // Files grid with horizontal scrolling
+        ScrollView {
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
 
-            for file[file-index] in group.files : PhotoCard {
-                photo: file;
-                show-selection: true;
-                compact: false;
-                toggle-selected => { file-toggled(group-index, file-index); }
+                for file[file-index] in group.files : Rectangle {
+                    width: card_display_width;
+                    height: card_display_height;
+                    clip: true;
+
+                    PhotoCard {
+                        width: 100%;
+                        height: 100%;
+                        photo: file;
+                        show-selection: true;
+                        compact: false;
+                        toggle-selected => { file-toggled(group-index, file-index); }
+                    }
+                }
             }
         }
 
-        // File details row
+        // File details row with scaled widths
         HorizontalLayout {
-            spacing: 8px;
+            spacing: 12px;
+            alignment: start;
 
             for file[file-index] in group.files : Rectangle {
-                width: 160px;
+                width: card_display_width;
 
                 VerticalLayout {
                     spacing: 2px;
@@ -161,6 +180,8 @@ export component DuplicatesView inherits Rectangle {
     in-out property <int> sort-by: 0;  // 0=Largest first, 1=Most files, 2=Newest
     in-out property <bool> show-pairs: true;
     in-out property <bool> show-multi: true;
+    in-out property <float> zoom-level: 100.0;  // 100% = 1x, up to 400% = 4x
+    in-out property <length> parent_width: 0px;
 
     callback file-toggled(int, int);
     callback select-all-best();
@@ -168,12 +189,16 @@ export component DuplicatesView inherits Rectangle {
     callback select-best-in-group(int);
     callback archive-others-in-group(int);
 
+    // Responsive state
+    property <bool> sidebar_expanded: (parent_width / 1px) > 900.0;
+    property <length> sidebar_width: sidebar_expanded ? 220px : 0px;
+
     background: Theme.colors.bg_secondary;
 
     HorizontalLayout {
-        // Sidebar
-        Rectangle {
-            width: 200px;
+        // Sidebar - responsive
+        if sidebar_expanded : Rectangle {
+            width: sidebar_width;
             background: Theme.colors.bg_card;
             border-width: 0px;
             border-color: Theme.colors.border_default;
@@ -321,85 +346,195 @@ export component DuplicatesView inherits Rectangle {
 
             VerticalLayout {
                 padding: 16px;
-                spacing: 12px;
+                spacing: 0px;
 
-                // Header
-                HorizontalLayout {
-                    spacing: 12px;
+                // Header and content
+                Rectangle {
+                    vertical-stretch: 1;
 
-                    Text {
-                        text: "Duplicate Groups";
-                        font-size: 16pt;
-                        font-weight: 600;
-                        color: Theme.colors.text_primary;
-                        vertical-alignment: center;
-                    }
+                    VerticalLayout {
+                        spacing: 12px;
+                        padding-bottom: 12px;
 
-                    Rectangle {
-                        height: 24px;
-                        border-radius: 4px;
-                        background: Theme.colors.accent_primary.with_alpha(0.15);
-
+                        // Header
                         HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
+                            spacing: 12px;
 
                             Text {
-                                text: groups.length + " groups, " + stats.total_files + " files";
-                                font-size: 10pt;
-                                color: Theme.colors.accent_primary;
+                                text: "Duplicate Groups";
+                                font-size: 16pt;
+                                font-weight: 600;
+                                color: Theme.colors.text_primary;
                                 vertical-alignment: center;
+                            }
+
+                            Rectangle {
+                                height: 24px;
+                                border-radius: 4px;
+                                background: Theme.colors.accent_primary.with_alpha(0.15);
+
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+
+                                    Text {
+                                        text: groups.length + " groups, " + stats.total_files + " files";
+                                        font-size: 10pt;
+                                        color: Theme.colors.accent_primary;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+
+                        // Empty state
+                        if groups.length == 0 : Rectangle {
+                            vertical-stretch: 1;
+                            background: Theme.colors.bg_card;
+                            border-radius: 8px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 12px;
+
+                                Text {
+                                    text: "\u{1F4C1}";
+                                    font-size: 48pt;
+                                    horizontal-alignment: center;
+                                }
+
+                                Text {
+                                    text: "No duplicates found";
+                                    font-size: 14pt;
+                                    font-weight: 600;
+                                    color: Theme.colors.text_secondary;
+                                    horizontal-alignment: center;
+                                }
+
+                                Text {
+                                    text: "Run a scan to find duplicate photos";
+                                    font-size: 11pt;
+                                    color: Theme.colors.text_muted;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+
+                        // Groups list
+                        if groups.length > 0 : ScrollView {
+                            VerticalLayout {
+                                spacing: 12px;
+
+                                for group[group-index] in groups : DuplicateGroupCard {
+                                    group: group;
+                                    group-index: group-index;
+                                    zoom-level: zoom-level;
+                                    file-toggled(gi, fi) => { file-toggled(gi, fi); }
+                                    select-best(gi) => { select-best-in-group(gi); }
+                                    archive-others(gi) => { archive-others-in-group(gi); }
+                                }
                             }
                         }
                     }
-
-                    Rectangle { horizontal-stretch: 1; }
                 }
 
-                // Empty state
-                if groups.length == 0 : Rectangle {
-                    vertical-stretch: 1;
+                // Zoom slider section
+                Rectangle {
+                    height: 40px;
                     background: Theme.colors.bg_card;
-                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: Theme.colors.border_default;
+                    border-radius: 4px;
 
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 12px;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
 
-                        Text {
-                            text: "\u{1F4C1}";
-                            font-size: 48pt;
-                            horizontal-alignment: center;
+                        Rectangle { horizontal-stretch: 1; }
+
+                        // Zoom out button
+                        Button {
+                            text: "−";
+                            width: 32px;
+                            clicked => {
+                                if zoom-level > 100.0 {
+                                    zoom-level = max(100.0, zoom-level - 25.0);
+                                }
+                            }
                         }
 
-                        Text {
-                            text: "No duplicates found";
-                            font-size: 14pt;
-                            font-weight: 600;
-                            color: Theme.colors.text_secondary;
-                            horizontal-alignment: center;
+                        // Zoom percentage display
+                        Rectangle {
+                            width: 50px;
+                            height: 100%;
+
+                            Text {
+                                text: round(zoom-level) + "%";
+                                font-size: 10pt;
+                                color: Theme.colors.text_secondary;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                            }
                         }
 
-                        Text {
-                            text: "Run a scan to find duplicate photos";
-                            font-size: 11pt;
-                            color: Theme.colors.text_muted;
-                            horizontal-alignment: center;
+                        // Zoom slider
+                        Rectangle {
+                            width: 150px;
+                            height: 100%;
+
+                            // Slider background
+                            Rectangle {
+                                width: 100%;
+                                y: (parent.height - 4px) / 2;
+                                height: 4px;
+                                border-radius: 2px;
+                                background: Theme.colors.bg_secondary;
+
+                                Rectangle {
+                                    width: ((zoom-level - 100.0) / 300.0) * parent.width;
+                                    height: 100%;
+                                    background: Theme.colors.accent_primary;
+                                    border-radius: 2px;
+                                }
+                            }
+
+                            // Slider thumb
+                            Rectangle {
+                                width: 12px;
+                                height: 12px;
+                                x: ((zoom-level - 100.0) / 300.0) * (parent.width - self.width);
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 6px;
+                                background: Theme.colors.accent_primary;
+                                border-width: 2px;
+                                border-color: white;
+                            }
+
+                            // Click area to set zoom level
+                            TouchArea {
+                                width: 100%;
+                                height: 100%;
+                                mouse-cursor: pointer;
+
+                                clicked => {
+                                    // Get mouse position relative to the slider
+                                    // For now, just provide visual feedback through button controls
+                                }
+                            }
                         }
-                    }
-                }
 
-                // Groups list
-                if groups.length > 0 : ScrollView {
-                    VerticalLayout {
-                        spacing: 12px;
-
-                        for group[group-index] in groups : DuplicateGroupCard {
-                            group: group;
-                            group-index: group-index;
-                            file-toggled(gi, fi) => { file-toggled(gi, fi); }
-                            select-best(gi) => { select-best-in-group(gi); }
-                            archive-others(gi) => { archive-others-in-group(gi); }
+                        // Zoom in button
+                        Button {
+                            text: "+";
+                            width: 32px;
+                            clicked => {
+                                if zoom-level < 400.0 {
+                                    zoom-level = min(400.0, zoom-level + 25.0);
+                                }
+                            }
                         }
                     }
                 }

@@ -104,7 +104,8 @@ fn cella110n_cl_tagger() -> (&'static str, ModelConfig) {
                 format: None,
                 multi_label: true,
             },
-            description: "EVA02-large based tagger with 42,163 tags across 6 categories".to_string(),
+            description: "EVA02-large based tagger with 42,163 tags across 6 categories"
+                .to_string(),
             enabled: true,
         },
     )

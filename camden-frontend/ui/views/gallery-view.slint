@@ -49,6 +49,14 @@ export component GalleryView inherits Rectangle {
     callback select-all();
     callback deselect-all();
 
+    // Responsive grid settings - simplify to avoid binding loops
+    // Use 4 columns by default - responsive design will adapt card sizes within grid
+    property <int> columns_count: 4;
+
+    // Card sizing defaults (can be overridden by scroll view width)
+    property <length> card_width: 160px;
+    property <length> card_height: 260px;
+
     background: Theme.colors.bg_secondary;
 
     HorizontalLayout {
@@ -312,21 +320,28 @@ export component GalleryView inherits Rectangle {
                     }
                 }
 
-                // Photo grid
+                // Photo grid with improved layout - supports 4-6 columns
                 if photos.length > 0 : ScrollView {
-                    VerticalLayout {
-                        spacing: 12px;
-                        padding-bottom: 16px;
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
 
-                        // Wrap photos in rows (4 per row for now)
+                    VerticalLayout {
+                        width: 100%;
+                        spacing: 12px;
+                        padding: 0px;
+                        padding-bottom: 16px;
+                        alignment: start;
+
+                        // Wrap photos in responsive rows (4 columns, scales naturally with parent)
                         for row-start in [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96, 100] : HorizontalLayout {
                             spacing: 12px;
                             visible: row-start < photos.length;
+                            horizontal-stretch: 1;
 
                             for col in [0, 1, 2, 3] : Rectangle {
                                 visible: (row-start + col) < photos.length;
-                                width: self.visible ? 160px : 0px;
-                                height: 220px;  // Match PhotoCard's natural height
+                                width: self.visible ? card_width : 0px;
+                                height: card_height;
 
                                 if (row-start + col) < photos.length : PhotoCard {
                                     photo: photos[row-start + col];

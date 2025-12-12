@@ -1,8 +1,8 @@
 mod cli;
 
 use camden_core::{
-    count_entries, create_snapshot, move_duplicates, print_duplicates, progress, scan, write_json,
-    write_snapshot, write_classification_report, ScanConfig,
+    count_entries, create_snapshot, move_duplicates, print_duplicates, progress, scan,
+    write_classification_report, write_json, write_snapshot, ScanConfig,
 };
 use cli::{CliConfig, Command, PreviewConfig};
 use indicatif::ProgressBar;
@@ -11,16 +11,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 fn main() {
-    let command = Command::from_env().unwrap_or_else(|err| {
-        match err {
-            cli::CliError::Help | cli::CliError::Version => {
-                println!("{}", err);
-                std::process::exit(0);
-            }
-            _ => {
-                eprintln!("{}", err);
-                std::process::exit(1);
-            }
+    let command = Command::from_env().unwrap_or_else(|err| match err {
+        cli::CliError::Help | cli::CliError::Version => {
+            println!("{}", err);
+            std::process::exit(0);
+        }
+        _ => {
+            eprintln!("{}", err);
+            std::process::exit(1);
         }
     });
 
@@ -42,7 +40,7 @@ fn run_scan(config: CliConfig) {
         .with_low_resolution_detection(config.detect_low_resolution)
         .with_classification(config.enable_classification)
         .with_feature_detection(config.enable_feature_detection);
-    
+
     let summary = scan(&config.root, &scan_config, &progress_bar, None);
     progress_bar.finish_with_message("Scan complete");
 
@@ -86,7 +84,7 @@ fn run_preview(config: PreviewConfig) {
         .with_low_resolution_detection(config.detect_low_resolution)
         .with_classification(config.enable_classification)
         .with_feature_detection(config.enable_feature_detection);
-    
+
     if let Some(root) = config.thumbnail_root() {
         scan_config = scan_config.with_thumbnail_root(root.to_path_buf());
     }

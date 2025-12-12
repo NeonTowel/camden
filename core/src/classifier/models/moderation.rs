@@ -43,10 +43,7 @@ fn n4xtan_nsfw_classification() -> (&'static str, ModelConfig) {
             },
             output: ModelOutputSpec {
                 num_classes: 2,
-                labels: vec![
-                    "normal".to_string(),
-                    "nsfw".to_string(),
-                ],
+                labels: vec!["normal".to_string(), "nsfw".to_string()],
                 labels_file: None,
                 format: Some("binary".to_string()),
                 multi_label: false,
@@ -86,8 +83,7 @@ fn spiele_nsfw_image_detector() -> (&'static str, ModelConfig) {
                 format: Some("nsfw_4tier".to_string()),
                 multi_label: false,
             },
-            description: "EVA02-based 4-tier NSFW severity detector (Neutral → High)"
-                .to_string(),
+            description: "EVA02-based 4-tier NSFW severity detector (Neutral → High)".to_string(),
             enabled: true,
         },
     )
@@ -111,7 +107,7 @@ fn vladmandic_nudenet() -> (&'static str, ModelConfig) {
                 batch_dim: true, // NudeNet expects rank-4 tensor [N, C, H, W]
             },
             output: ModelOutputSpec {
-                num_classes: 12, // Body part detection classes
+                num_classes: 12,    // Body part detection classes
                 labels: Vec::new(), // Labels embedded in model
                 labels_file: None,
                 format: Some("detection".to_string()),
@@ -183,8 +179,7 @@ fn taufiqdp_mobilenetv4_nsfw() -> (&'static str, ModelConfig) {
                 format: Some("gantman".to_string()),
                 multi_label: false,
             },
-            description: "MobileNetV4-based NSFW classifier (GantMan 5-class schema)"
-                .to_string(),
+            description: "MobileNetV4-based NSFW classifier (GantMan 5-class schema)".to_string(),
             enabled: true,
         },
     )

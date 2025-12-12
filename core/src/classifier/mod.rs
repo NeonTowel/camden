@@ -35,15 +35,22 @@
 mod config;
 mod ensemble;
 mod labels;
-mod moderation;
 mod models;
+mod moderation;
 mod runtime;
 mod tagging;
 
-pub use config::{ClassifierConfig, ModelConfig, ModelInputSpec, ModelOutputSpec, ModelPreset, ModelType};
-pub use moderation::{AggregationStrategy, EnsembleModerationClassifier, ModerationCategories, ModerationConfig, ModerationFlags, ModerationModelFormat, ModerationTier, NsfwClassifier};
+pub use config::{
+    ClassifierConfig, ModelConfig, ModelInputSpec, ModelOutputSpec, ModelPreset, ModelType,
+};
+pub use moderation::{
+    AggregationStrategy, EnsembleModerationClassifier, ModerationCategories, ModerationConfig,
+    ModerationFlags, ModerationModelFormat, ModerationTier, NsfwClassifier,
+};
 pub use runtime::{ClassifierError, ModelPaths};
-pub use tagging::{EnsembleTaggingClassifier, ImageTag, TagCategory, TaggingClassifier, TaggingConfig};
+pub use tagging::{
+    EnsembleTaggingClassifier, ImageTag, TagCategory, TaggingClassifier, TaggingConfig,
+};
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -75,26 +82,26 @@ static ORT_INITIALIZED: OnceLock<()> = OnceLock::new();
 /// ```
 pub fn init_ort_runtime(dylib_path: impl AsRef<Path>) -> Result<(), ClassifierError> {
     let path = dylib_path.as_ref();
-    
+
     if ORT_INITIALIZED.get().is_some() {
         return Ok(());
     }
-    
+
     if !path.exists() {
         return Err(ClassifierError::Processing(format!(
             "ONNX Runtime library not found at: {}. Run 'task deps-onnxruntime' to download.",
             path.display()
         )));
     }
-    
+
     let path_str = path.to_str().ok_or_else(|| {
         ClassifierError::Processing("ONNX Runtime path contains invalid UTF-8".to_string())
     })?;
-    
+
     ort::init_from(path_str)
         .commit()
         .map_err(ClassifierError::Ort)?;
-    
+
     let _ = ORT_INITIALIZED.set(());
     Ok(())
 }
@@ -270,8 +277,10 @@ fn load_tagging_classifier(
 impl ImageClassifier {
     /// Create a new classifier with models from the specified paths.
     pub fn new(paths: &ModelPaths) -> Result<Self, ClassifierError> {
-        let moderation = ModerationClassifierVariant::Single(NsfwClassifier::new(&paths.nsfw_model)?);
-        let tagging = TaggingClassifierVariant::Single(TaggingClassifier::new(&paths.tagging_model)?);
+        let moderation =
+            ModerationClassifierVariant::Single(NsfwClassifier::new(&paths.nsfw_model)?);
+        let tagging =
+            TaggingClassifierVariant::Single(TaggingClassifier::new(&paths.tagging_model)?);
         Ok(Self {
             moderation,
             tagging,
@@ -284,7 +293,7 @@ impl ImageClassifier {
         let paths = ModelPaths::default();
         Self::new(&paths)
     }
-    
+
     /// Create a classifier from a configuration.
     pub fn from_config(config: ClassifierConfig) -> Result<Self, ClassifierError> {
         let moderation = load_moderation_classifier(&config)?;
@@ -296,13 +305,13 @@ impl ImageClassifier {
             config,
         })
     }
-    
+
     /// Create a classifier by loading config from file or using defaults.
     pub fn from_config_or_default() -> Result<Self, ClassifierError> {
         let config = ClassifierConfig::load_or_default();
         Self::from_config(config)
     }
-    
+
     /// Get the current configuration.
     pub fn config(&self) -> &ClassifierConfig {
         &self.config
@@ -317,10 +326,18 @@ impl ImageClassifier {
     }
 
     /// Generate tags for an image.
-    pub fn tag(&mut self, image_path: &Path, max_tags: usize) -> Result<Vec<ImageTag>, ClassifierError> {
+    pub fn tag(
+        &mut self,
+        image_path: &Path,
+        max_tags: usize,
+    ) -> Result<Vec<ImageTag>, ClassifierError> {
         match &mut self.tagging {
-            TaggingClassifierVariant::Single(classifier) => classifier.classify(image_path, max_tags),
-            TaggingClassifierVariant::Ensemble(classifier) => classifier.classify(image_path, max_tags),
+            TaggingClassifierVariant::Single(classifier) => {
+                classifier.classify(image_path, max_tags)
+            }
+            TaggingClassifierVariant::Ensemble(classifier) => {
+                classifier.classify(image_path, max_tags)
+            }
         }
     }
 
@@ -332,7 +349,9 @@ impl ImageClassifier {
         };
         let tags = match &mut self.tagging {
             TaggingClassifierVariant::Single(classifier) => classifier.classify(image_path, 10)?,
-            TaggingClassifierVariant::Ensemble(classifier) => classifier.classify(image_path, 10)?,
+            TaggingClassifierVariant::Ensemble(classifier) => {
+                classifier.classify(image_path, 10)?
+            }
         };
         Ok(ClassificationResult { moderation, tags })
     }

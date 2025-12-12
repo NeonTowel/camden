@@ -34,7 +34,10 @@ pub enum ModerationModelFormat {
     /// Used by spiele-nsfw-image-detector (EVA02-based)
     FourTierNsfw,
     /// Generic model - use raw scores
-    Generic { num_classes: usize, labels: Vec<String> },
+    Generic {
+        num_classes: usize,
+        labels: Vec<String>,
+    },
 }
 
 impl ModerationModelFormat {
@@ -58,7 +61,7 @@ impl ModerationModelFormat {
 
         Self::from_labels(labels)
     }
-    
+
     /// Detect format from label configuration only.
     pub fn from_labels(labels: &[String]) -> Self {
         match labels.len() {
@@ -119,7 +122,11 @@ impl Default for ModerationConfig {
 
 impl ModerationConfig {
     /// Create config from model input/output specs.
-    pub fn from_specs(input: &ModelInputSpec, labels: &[String], format_hint: Option<&str>) -> Self {
+    pub fn from_specs(
+        input: &ModelInputSpec,
+        labels: &[String],
+        format_hint: Option<&str>,
+    ) -> Self {
         Self {
             input_width: input.width,
             input_height: input.height,
@@ -146,14 +153,20 @@ impl NsfwClassifier {
     }
 
     /// Load the NSFW classifier with custom configuration.
-    pub fn with_config(model_path: &Path, config: ModerationConfig) -> Result<Self, ClassifierError> {
+    pub fn with_config(
+        model_path: &Path,
+        config: ModerationConfig,
+    ) -> Result<Self, ClassifierError> {
         let session = load_session(model_path)?;
         Ok(Self { session, config })
     }
 
     /// Classify an image and return moderation flags.
     pub fn classify(&mut self, image_path: &Path) -> Result<ModerationFlags, ClassifierError> {
-        let input_size = (self.config.input_width as i32, self.config.input_height as i32);
+        let input_size = (
+            self.config.input_width as i32,
+            self.config.input_height as i32,
+        );
 
         // Preprocess with model-specific settings (layout, normalization)
         let input = preprocess_image_with_layout(
@@ -175,8 +188,7 @@ impl NsfwClassifier {
             .unwrap_or_else(|| "pixel_values".to_string());
 
         // Create tensor from ndarray
-        let input_tensor =
-            ort::value::Tensor::from_array(input).map_err(ClassifierError::Ort)?;
+        let input_tensor = ort::value::Tensor::from_array(input).map_err(ClassifierError::Ort)?;
 
         // Run inference and extract scores before dropping outputs
         let probabilities = {
@@ -236,7 +248,7 @@ impl NsfwClassifier {
                     categories,
                 })
             }
-            
+
             ModerationModelFormat::TwoClassNormalNsfw => {
                 // Output: [normal, nsfw]
                 validate_probabilities(probabilities, 2, "TwoClassNormalNsfw")?;
@@ -259,7 +271,7 @@ impl NsfwClassifier {
                     categories,
                 })
             }
-            
+
             ModerationModelFormat::ThreeClassNsfw => {
                 // Output: [Safe, NSFW Mild, NSFW Explicit]
                 // Used by n4xtan-nsfw-classification
@@ -312,7 +324,10 @@ impl NsfwClassifier {
                 } else if low_score > 0.3 {
                     (ModerationTier::Sensitive, low_score)
                 } else {
-                    (ModerationTier::Safe, high_score.max(medium_score).max(low_score))
+                    (
+                        ModerationTier::Safe,
+                        high_score.max(medium_score).max(low_score),
+                    )
                 };
 
                 let categories = ModerationCategories {
@@ -352,8 +367,11 @@ impl NsfwClassifier {
                     categories,
                 })
             }
-            
-            ModerationModelFormat::Generic { num_classes, labels } => {
+
+            ModerationModelFormat::Generic {
+                num_classes,
+                labels,
+            } => {
                 validate_probabilities(probabilities, *num_classes, "Generic")?;
 
                 // Find the highest scoring class
@@ -371,7 +389,10 @@ impl NsfwClassifier {
                         ModerationTier::Restricted
                     }
                     s if s.contains("hentai") || s.contains("mature") => ModerationTier::Mature,
-                    s if s.contains("sexy") || s.contains("suggestive") || s.contains("sensual") => {
+                    s if s.contains("sexy")
+                        || s.contains("suggestive")
+                        || s.contains("sensual") =>
+                    {
                         ModerationTier::Sensitive
                     }
                     _ => ModerationTier::Safe,
@@ -380,14 +401,30 @@ impl NsfwClassifier {
                 let categories = ModerationCategories {
                     drawings: 0.0,
                     hentai: 0.0,
-                    neutral: if tier == ModerationTier::Safe { *max_score } else { 0.0 },
-                    porn: if tier == ModerationTier::Restricted { *max_score } else { 0.0 },
-                    sexy: if tier == ModerationTier::Sensitive { *max_score } else { 0.0 },
+                    neutral: if tier == ModerationTier::Safe {
+                        *max_score
+                    } else {
+                        0.0
+                    },
+                    porn: if tier == ModerationTier::Restricted {
+                        *max_score
+                    } else {
+                        0.0
+                    },
+                    sexy: if tier == ModerationTier::Sensitive {
+                        *max_score
+                    } else {
+                        0.0
+                    },
                 };
 
                 Ok(ModerationFlags {
                     tier,
-                    safety_score: if tier == ModerationTier::Safe { 0.0 } else { *max_score },
+                    safety_score: if tier == ModerationTier::Safe {
+                        0.0
+                    } else {
+                        *max_score
+                    },
                     categories,
                 })
             }
@@ -548,7 +585,9 @@ impl EnsembleModerationClassifier {
     }
 
     /// Create ensemble with custom configurations for each model.
-    pub fn with_configs(configs: Vec<(impl AsRef<Path>, ModerationConfig)>) -> Result<Self, ClassifierError> {
+    pub fn with_configs(
+        configs: Vec<(impl AsRef<Path>, ModerationConfig)>,
+    ) -> Result<Self, ClassifierError> {
         let mut classifiers = Vec::new();
         for (path, config) in configs {
             classifiers.push(NsfwClassifier::with_config(path.as_ref(), config)?);
@@ -588,7 +627,10 @@ impl EnsembleModerationClassifier {
     }
 
     /// Aggregate results by averaging category scores.
-    fn aggregate_average(&self, results: &[ModerationFlags]) -> Result<ModerationFlags, ClassifierError> {
+    fn aggregate_average(
+        &self,
+        results: &[ModerationFlags],
+    ) -> Result<ModerationFlags, ClassifierError> {
         let n = results.len() as f32;
 
         // Average each category score
@@ -611,7 +653,10 @@ impl EnsembleModerationClassifier {
     }
 
     /// Aggregate results by taking the maximum (most restrictive) tier.
-    fn aggregate_max_tier(&self, results: &[ModerationFlags]) -> Result<ModerationFlags, ClassifierError> {
+    fn aggregate_max_tier(
+        &self,
+        results: &[ModerationFlags],
+    ) -> Result<ModerationFlags, ClassifierError> {
         // Find the result with the highest tier level
         let max_result = results
             .iter()
@@ -695,7 +740,11 @@ mod tests {
     #[test]
     fn test_format_detection() {
         let gantman = ModerationModelFormat::from_labels(&[
-            "drawings".into(), "hentai".into(), "neutral".into(), "porn".into(), "sexy".into()
+            "drawings".into(),
+            "hentai".into(),
+            "neutral".into(),
+            "porn".into(),
+            "sexy".into(),
         ]);
         assert_eq!(gantman, ModerationModelFormat::GantMan5Class);
 
@@ -705,20 +754,24 @@ mod tests {
         let adamcodd = ModerationModelFormat::from_labels(&["nsfw".into(), "sfw".into()]);
         assert_eq!(adamcodd, ModerationModelFormat::TwoClassNsfwSfw);
     }
-    
+
     #[test]
     fn test_format_explicit_hint() {
         let labels = vec![
-            "drawings".into(), "hentai".into(), "neutral".into(), "porn".into(), "sexy".into()
+            "drawings".into(),
+            "hentai".into(),
+            "neutral".into(),
+            "porn".into(),
+            "sexy".into(),
         ];
-        
+
         // Both GantMan and NSFWJS hints should resolve to the same 5-class format
         let gantman = ModerationModelFormat::from_config(Some("gantman"), &labels);
         assert_eq!(gantman, ModerationModelFormat::GantMan5Class);
-        
+
         let nsfwjs = ModerationModelFormat::from_config(Some("nsfwjs"), &labels);
         assert_eq!(nsfwjs, ModerationModelFormat::GantMan5Class);
-        
+
         // Without hint, should detect GantMan5Class from labels
         let auto = ModerationModelFormat::from_config(None, &labels);
         assert_eq!(auto, ModerationModelFormat::GantMan5Class);

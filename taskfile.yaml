@@ -606,32 +606,63 @@ tasks:
       - task: sync-cargo-versions
 
   bump-patch:
-    desc: Increment patch version (0.0.X) and reset build number
+    desc: Increment patch version (0.0.X) with auto-promotion at 10 patches
     silent: true
     cmds:
       - |
+        MAJOR=$(grep 'major' VERSION.toml | sed 's/[^0-9]*//g')
+        MINOR=$(grep 'minor' VERSION.toml | sed 's/[^0-9]*//g')
         PATCH=$(grep 'patch' VERSION.toml | sed 's/[^0-9]*//g')
-        NEW_PATCH=$((PATCH + 1))
 
+        NEW_PATCH=$((PATCH + 1))
+        NEW_MINOR=$MINOR
+        NEW_MAJOR=$MAJOR
+
+        # Auto-promote: when patch reaches 10, reset to 0 and bump minor
+        if [ $NEW_PATCH -eq 10 ]; then
+          NEW_PATCH=0
+          NEW_MINOR=$((MINOR + 1))
+
+          # Auto-promote: when minor reaches 10, reset to 0 and bump major
+          if [ $NEW_MINOR -eq 10 ]; then
+            NEW_MINOR=0
+            NEW_MAJOR=$((MAJOR + 1))
+          fi
+        fi
+
+        # Update VERSION.toml
+        sed -i "s/major = ${MAJOR}/major = ${NEW_MAJOR}/" VERSION.toml
+        sed -i "s/minor = ${MINOR}/minor = ${NEW_MINOR}/" VERSION.toml
         sed -i "s/patch = ${PATCH}/patch = ${NEW_PATCH}/" VERSION.toml
         sed -i "s/build = .*/build = 1/" VERSION.toml
 
-        echo "Patch version bumped: ${PATCH} -> ${NEW_PATCH}, build reset to 1"
+        echo "Patch bumped: ${MAJOR}.${MINOR}.${PATCH} -> ${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}, build reset to 1"
       - task: sync-cargo-versions
 
   bump-minor:
-    desc: Increment minor version (0.X.0) and reset patch/build
+    desc: Increment minor version (0.X.0) with auto-promotion at 10 minors
     silent: true
     cmds:
       - |
+        MAJOR=$(grep 'major' VERSION.toml | sed 's/[^0-9]*//g')
         MINOR=$(grep 'minor' VERSION.toml | sed 's/[^0-9]*//g')
-        NEW_MINOR=$((MINOR + 1))
 
+        NEW_MINOR=$((MINOR + 1))
+        NEW_MAJOR=$MAJOR
+
+        # Auto-promote: when minor reaches 10, reset to 0 and bump major
+        if [ $NEW_MINOR -eq 10 ]; then
+          NEW_MINOR=0
+          NEW_MAJOR=$((MAJOR + 1))
+        fi
+
+        # Update VERSION.toml
+        sed -i "s/major = ${MAJOR}/major = ${NEW_MAJOR}/" VERSION.toml
         sed -i "s/minor = ${MINOR}/minor = ${NEW_MINOR}/" VERSION.toml
         sed -i "s/patch = .*/patch = 0/" VERSION.toml
         sed -i "s/build = .*/build = 1/" VERSION.toml
 
-        echo "Minor version bumped: ${MINOR} -> ${NEW_MINOR}"
+        echo "Minor version bumped: ${MAJOR}.${MINOR} -> ${NEW_MAJOR}.${NEW_MINOR}, patch reset to 0, build reset to 1"
       - task: sync-cargo-versions
 
   bump-major:
@@ -659,12 +690,23 @@ tasks:
 
   fmt:
     cmds:
-      - cargo fmt --all
+      - cargo fmt --all -- --check
+
+  coverage:
+    cmds:
+      - cargo tarpaulin --workspace --all-features --out Xml --lib --bins
+    env:
+      CARGO_TARGET_DIR: ./target/coverage  # Separate from dev
+
+  clippy:
+    cmds:
+      - cargo clippy --workspace --all-targets -- -D warnings
+
 
   test:
     silent: true
     cmds:
-      - cargo test --workspace --all-targets
+      - cargo test --workspace --all-targets --all-features
 
   frontend:
     desc: Run the Slint frontend application

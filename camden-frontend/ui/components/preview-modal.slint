@@ -1,0 +1,91 @@
+// Preview Modal - full-screen photo preview with metadata overlay
+import { PhotoData } from "photo-card.slint";
+import { Theme } from "theme.slint";
+
+export component PreviewModal inherits Rectangle {
+    in property <PhotoData> photo;
+    in-out property <float> preview_zoom: 100.0;  // 100% = fit-to-window, can zoom up to 400%
+
+    callback close-requested();
+
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.95);
+    z: 1000;
+
+    // Main photo container with black background
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: black;
+        clip: true;
+
+        // Center the image
+        HorizontalLayout {
+            alignment: center;
+
+            VerticalLayout {
+                alignment: center;
+
+                // Photo image
+                Image {
+                    source: photo.thumbnail;
+                    image-fit: contain;
+                    width: 100%;
+                    height: 100%;
+                }
+            }
+        }
+
+        // Metadata overlay (bottom-left)
+        metadata-text := VerticalLayout {
+            x: 16px;
+            y: parent.height - 16px - self.height - 8px;
+            width: parent.width - 32px;
+            spacing: 2px;
+
+            // Line 1: Filename
+            Text {
+                text: photo.display_name;
+                font-size: 12pt;
+                color: white;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+
+            // Line 2: Dimensions, Aspect Ratio, Tags, Classification
+            Text {
+                text: format_metadata(photo);
+                font-size: 10pt;
+                color: rgba(255, 255, 255, 0.8);
+                wrap: word-wrap;
+            }
+        }
+
+        // Click outside to close
+        background-touch := TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => {
+                close-requested();
+            }
+        }
+    }
+
+    // Helper function to format metadata line
+    pure function format_metadata(photo: PhotoData) -> string {
+        // Combine info (size, dimensions, date) with aspect ratio, tags, and moderation
+        let info_line = photo.info;
+        let has_ratio = photo.aspect_ratio != "";
+        let has_tags = photo.tags != "";
+        let has_moderation = photo.moderation_tier != "" && photo.moderation_tier != "Safe";
+
+        let ratio_str = has_ratio ? "Ratio: " + photo.aspect_ratio : "";
+        let tags_str = has_tags ? "Tags: " + photo.tags : "";
+        let moderation_str = has_moderation ? photo.moderation_tier : "";
+
+        // Build result string - just concatenate with separators
+        (info_line != "" && (has_ratio || has_tags || has_moderation)) ? info_line + " • " + ratio_str + (has_tags ? " • " + tags_str : "") + (has_moderation ? " • " + moderation_str : "") :
+        (info_line != "" ? info_line : "") + (ratio_str != "" ? (info_line != "" ? " • " : "") + ratio_str : "") + (tags_str != "" ? " • " + tags_str : "") + (moderation_str != "" ? " • " + moderation_str : "")
+    }
+}

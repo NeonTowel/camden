@@ -110,9 +110,8 @@ pub fn load_labels_from_csv(path: &Path) -> Result<Vec<String>, ClassifierError>
 
     let mut labels = Vec::new();
     for record in reader.records() {
-        let record = record.map_err(|e| {
-            ClassifierError::Processing(format!("invalid label record: {}", e))
-        })?;
+        let record = record
+            .map_err(|e| ClassifierError::Processing(format!("invalid label record: {}", e)))?;
 
         // Extract label from second column (index 1)
         if let Some(name) = record.get(1) {

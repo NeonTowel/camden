@@ -17,6 +17,8 @@ export struct PhotoData {
     moderation_tier: string,
     // AI-generated tags (comma-separated)
     tags: string,
+    // Aspect ratio as string (e.g., "16:9", "4:3")
+    aspect_ratio: string,
     // For duplicate groups
     is_keep_candidate: bool,
     group_id: int,
@@ -30,8 +32,10 @@ export component PhotoCard inherits Rectangle {
     callback clicked();
     callback toggle-selected();
 
+    // Allow flexible sizing - defaults for backward compatibility
     width: compact ? 120px : 160px;
-    height: compact ? 160px : 220px;
+    height: compact ? 160px : 260px;
+
     border-width: 1px;
     border-color: photo.selected ? Theme.selection_color : Theme.colors.border_default;
     border-radius: 8px;
@@ -121,6 +125,13 @@ export component PhotoCard inherits Rectangle {
             wrap: word-wrap;
             font-size: compact ? 8pt : 9pt;
             color: Theme.colors.text_secondary;
+        }
+
+        // Aspect ratio
+        if photo.aspect_ratio != "" : Text {
+            text: "Ratio: " + photo.aspect_ratio;
+            font-size: compact ? 7pt : 8pt;
+            color: Theme.colors.text_muted;
         }
 
         // Badges row

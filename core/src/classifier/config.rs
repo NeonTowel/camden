@@ -298,16 +298,14 @@ impl ClassifierConfig {
                 path.display()
             )));
         }
-        
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            ClassifierError::Processing(format!("failed to read config: {}", e))
-        })?;
-        
-        toml::from_str(&content).map_err(|e| {
-            ClassifierError::Processing(format!("invalid config TOML: {}", e))
-        })
+
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| ClassifierError::Processing(format!("failed to read config: {}", e)))?;
+
+        toml::from_str(&content)
+            .map_err(|e| ClassifierError::Processing(format!("invalid config TOML: {}", e)))
     }
-    
+
     /// Load configuration from default location, merging with built-in defaults.
     ///
     /// User config only needs to specify model names:
@@ -357,9 +355,8 @@ impl ClassifierConfig {
             ClassifierError::Processing(format!("failed to serialize config: {}", e))
         })?;
 
-        std::fs::write(path, content).map_err(|e| {
-            ClassifierError::Processing(format!("failed to write config: {}", e))
-        })
+        std::fs::write(path, content)
+            .map_err(|e| ClassifierError::Processing(format!("failed to write config: {}", e)))
     }
 
     /// Get the full path to a model file.
@@ -497,7 +494,7 @@ impl ClassifierConfig {
 
         Ok(())
     }
-    
+
     /// Default model presets available for download.
     fn default_presets() -> Vec<ModelPreset> {
         vec![
@@ -657,32 +654,32 @@ mod tests {
     #[test]
     fn test_model_path_resolution() {
         let config = ClassifierConfig::default();
-        let path = config.model_path("mobilenetv2").unwrap();
-        assert!(path.ends_with("mobilenetv2-12.onnx"));
+        let path = config.model_path("smilingwolf-wd-v1-4-convnextv2-tagger-v2").unwrap();
+        assert!(path.ends_with("smilingwolf-wd-v1-4-convnextv2-tagger-v2.onnx"));
     }
 
     #[test]
     fn test_simple_toml_config() {
         let toml = r#"
-            moderation_model = "adamcodd-vit-nsfw"
-            tagging_model = "wd-vit-tagger-v3"
+            moderation_model = "spiele-nsfw-image-detector"
+            tagging_model = "fancyfeast-joytag"
         "#;
         let parsed: ClassifierConfig = toml::from_str(toml).unwrap();
         assert_eq!(
             parsed.moderation_model,
-            Some("adamcodd-vit-nsfw".to_string())
+            Some("spiele-nsfw-image-detector".to_string())
         );
-        assert_eq!(parsed.tagging_model, Some("wd-vit-tagger-v3".to_string()));
+        assert_eq!(parsed.tagging_model, Some("fancyfeast-joytag".to_string()));
     }
 
     #[test]
     fn test_builtin_models_available() {
         let config = ClassifierConfig::default();
         // Check moderation models
-        assert!(config.get_model("gantman-nsfw").is_some());
-        assert!(config.get_model("adamcodd-vit-nsfw").is_some());
+        assert!(config.get_model("taufiqdp-mobilenetv4-nsfw").is_some());
+        assert!(config.get_model("spiele-nsfw-image-detector").is_some());
         // Check tagging models
-        assert!(config.get_model("mobilenetv2").is_some());
-        assert!(config.get_model("wd-vit-tagger-v3").is_some());
+        assert!(config.get_model("smilingwolf-wd-v1-4-convnextv2-tagger-v2").is_some());
+        assert!(config.get_model("fancyfeast-joytag").is_some());
     }
 }

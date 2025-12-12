@@ -41,7 +41,7 @@ impl ResolutionTier {
 
 /// Determines the resolution tier for an image based on its dimensions.
 ///
-/// - **Landscape/square** (width >= height): 
+/// - **Landscape/square** (width >= height):
 ///   - High if width >= 1200, else Low
 /// - **Portrait** (height > width):
 ///   - High if height >= 1200

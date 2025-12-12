@@ -34,8 +34,8 @@ static CATEGORY_KEYWORDS: Lazy<HashMap<TagCategory, Vec<String>>> = Lazy::new(||
     const EMBEDDED_CONFIG: &str = include_str!("../../../.vendor/models/tag_categories.toml");
 
     // Parse TOML configuration
-    let config: TagCategoriesConfig = toml::from_str(EMBEDDED_CONFIG)
-        .expect("Failed to parse tag_categories.toml");
+    let config: TagCategoriesConfig =
+        toml::from_str(EMBEDDED_CONFIG).expect("Failed to parse tag_categories.toml");
 
     // Convert string keys to TagCategory enum
     let mut category_map = HashMap::new();
@@ -144,11 +144,7 @@ pub struct TaggingClassifier {
 impl TaggingClassifier {
     /// Load the tagging classifier from an ONNX model file with default config.
     pub fn new(model_path: &Path) -> Result<Self, ClassifierError> {
-        Self::with_config_and_labels(
-            model_path,
-            TaggingConfig::default(),
-            Self::default_labels(),
-        )
+        Self::with_config_and_labels(model_path, TaggingConfig::default(), Self::default_labels())
     }
 
     /// Load the tagging classifier with custom configuration.
@@ -176,7 +172,10 @@ impl TaggingClassifier {
         image_path: &Path,
         max_tags: usize,
     ) -> Result<Vec<ImageTag>, ClassifierError> {
-        let input_size = (self.config.input_width as i32, self.config.input_height as i32);
+        let input_size = (
+            self.config.input_width as i32,
+            self.config.input_height as i32,
+        );
 
         // Preprocess with model-specific settings including layout
         let input = preprocess_image_with_layout(
@@ -198,8 +197,7 @@ impl TaggingClassifier {
             .unwrap_or_else(|| "input".to_string());
 
         // Create tensor from ndarray
-        let input_tensor =
-            ort::value::Tensor::from_array(input).map_err(ClassifierError::Ort)?;
+        let input_tensor = ort::value::Tensor::from_array(input).map_err(ClassifierError::Ort)?;
 
         // Run inference
         let outputs = self
@@ -228,7 +226,7 @@ impl TaggingClassifier {
         } else {
             logits_slice.to_vec()
         };
-        
+
         // For multi-label models (e.g., WD taggers), outputs are already sigmoid probabilities
         // for each tag independently. Do NOT apply softmax as it would incorrectly normalize
         // across all 10k+ tags, making all probabilities tiny.
@@ -357,7 +355,6 @@ fn categorize_label(label: &str) -> (TagCategory, &str) {
     (TagCategory::Object, primary)
 }
 
-
 /// Ensemble classifier that runs multiple tagging models and merges results.
 pub struct EnsembleTaggingClassifier {
     classifiers: Vec<TaggingClassifier>,
@@ -415,7 +412,9 @@ impl EnsembleTaggingClassifier {
         }
 
         // Get min_confidence from first classifier (all should use same threshold)
-        let min_confidence = self.classifiers.first()
+        let min_confidence = self
+            .classifiers
+            .first()
             .map(|c| c.config.min_confidence)
             .unwrap_or(DEFAULT_MIN_TAG_CONFIDENCE);
 

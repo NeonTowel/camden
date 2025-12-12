@@ -7,13 +7,12 @@ import { Theme } from "../components/theme.slint";
 export component ScanView inherits Rectangle {
     // Input paths
     in-out property <string> root-path: "";
-    in-out property <string> archive-path: "";
 
     // Scan options
     in-out property <bool> find-duplicates: true;
-    in-out property <bool> classify-images: true;
+    in-out property <bool> classify-images: false;
     in-out property <bool> detect-low-res: true;
-    in-out property <bool> feature-detection: false;
+    in-out property <bool> feature-detection: true;
     in-out property <bool> rename-to-guid: false;
 
     // Scan state
@@ -31,7 +30,6 @@ export component ScanView inherits Rectangle {
 
     // Callbacks
     callback browse-root();
-    callback browse-archive();
     callback start-scan();
 
     background: Theme.colors.bg_card;
@@ -92,41 +90,6 @@ export component ScanView inherits Rectangle {
                         Button {
                             text: "Browse...";
                             clicked => { browse-root(); }
-                            enabled: !scanning;
-                        }
-                    }
-                }
-
-                // Archive folder
-                VerticalLayout {
-                    spacing: 6px;
-
-                    Text {
-                        text: "Archive Destination";
-                        font-size: 10pt;
-                        font-weight: 600;
-                        color: Theme.colors.text_primary;
-                    }
-
-                    Text {
-                        text: "Duplicates and selected files will be moved here (recoverable)";
-                        font-size: 9pt;
-                        color: Theme.colors.text_muted;
-                    }
-
-                    HorizontalLayout {
-                        spacing: 8px;
-
-                        LineEdit {
-                            placeholder-text: "Select archive folder...";
-                            text <=> archive-path;
-                            horizontal-stretch: 1;
-                            enabled: !scanning;
-                        }
-
-                        Button {
-                            text: "Browse...";
-                            clicked => { browse-archive(); }
                             enabled: !scanning;
                         }
                     }
@@ -196,50 +159,6 @@ export component ScanView inherits Rectangle {
             }
         }
 
-        // Quick Presets
-        HorizontalLayout {
-            spacing: 12px;
-
-            Text {
-                text: "Quick presets:";
-                font-size: 10pt;
-                color: Theme.colors.text_secondary;
-                vertical-alignment: center;
-            }
-
-            Button {
-                text: "Full Analysis";
-                enabled: !scanning;
-                clicked => {
-                    find-duplicates = true;
-                    classify-images = true;
-                    detect-low-res = true;
-                    feature-detection = true;
-                }
-            }
-
-            Button {
-                text: "Duplicates Only";
-                enabled: !scanning;
-                clicked => {
-                    find-duplicates = true;
-                    classify-images = false;
-                    detect-low-res = false;
-                    feature-detection = true;
-                }
-            }
-
-            Button {
-                text: "Quick Scan";
-                enabled: !scanning;
-                clicked => {
-                    find-duplicates = true;
-                    classify-images = false;
-                    detect-low-res = true;
-                    feature-detection = false;
-                }
-            }
-        }
 
         // Scan Progress
         ScanProgress {

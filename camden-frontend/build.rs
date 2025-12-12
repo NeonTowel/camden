@@ -14,7 +14,10 @@ fn main() {
         let patch = parse_field(&content, "patch").unwrap_or(0);
         let build = parse_field(&content, "build").unwrap_or(1);
 
-        println!("cargo:rustc-env=CAMDEN_VERSION={}.{}.{}", major, minor, patch);
+        println!(
+            "cargo:rustc-env=CAMDEN_VERSION={}.{}.{}",
+            major, minor, patch
+        );
         println!("cargo:rustc-env=CAMDEN_BUILD={}", build);
         println!(
             "cargo:rustc-env=CAMDEN_VERSION_FULL=v{}.{}.{} (build {})",

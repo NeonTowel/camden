@@ -1,13 +1,16 @@
-use camden_core::{ResolutionTier, ScanConfig, ScanSummary, ThreadingMode, move_paths, scan, write_classification_report};
+use camden_core::{
+    ResolutionTier, ScanConfig, ScanSummary, ThreadingMode, move_paths, scan,
+    write_classification_report,
+};
 use indicatif::{ProgressBar, ProgressStyle};
-use slint::{Image, ModelRc, SharedString, VecModel, Timer, TimerMode};
+use serde::{Deserialize, Serialize};
+use slint::{Image, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use serde::{Serialize, Deserialize};
 
 slint::include_modules!();
 
@@ -46,7 +49,7 @@ use std::time::Instant;
 #[derive(Default, Clone)]
 struct AppState {
     groups: Vec<InternalGroup>,
-    all_photos: Vec<InternalFile>, // All scanned photos for gallery
+    all_photos: Vec<InternalFile>,     // All scanned photos for gallery
     gallery_photos: Vec<InternalFile>, // Filtered gallery view
     scanning: bool,
     last_scan_duration: Option<std::time::Duration>,
@@ -63,6 +66,11 @@ struct AppSettings {
     dark_mode: bool,
     show_tags: bool,
     compact_cards: bool,
+    scan_find_duplicates: bool,
+    scan_classify_images: bool,
+    scan_detect_low_res: bool,
+    scan_feature_detection: bool,
+    scan_rename_to_guid: bool,
 }
 
 impl Default for AppSettings {
@@ -75,6 +83,11 @@ impl Default for AppSettings {
             dark_mode: true,
             show_tags: true,
             compact_cards: false,
+            scan_find_duplicates: true,
+            scan_classify_images: false,
+            scan_detect_low_res: true,
+            scan_feature_detection: true,
+            scan_rename_to_guid: false,
         }
     }
 }
@@ -110,13 +123,28 @@ fn main() -> Result<(), slint::PlatformError> {
     let settings = Arc::new(Mutex::new(load_settings()));
     {
         let settings = settings.lock().unwrap();
-        ui.set_root_path(settings.last_root_path.clone()
-            .unwrap_or_else(|| default_initial_root()).into());
-        ui.set_target_path(settings.last_target_path.clone()
-            .unwrap_or_else(|| default_target_path()).into());
+        ui.set_root_path(
+            settings
+                .last_root_path
+                .clone()
+                .unwrap_or_else(|| default_initial_root())
+                .into(),
+        );
+        ui.set_target_path(
+            settings
+                .last_target_path
+                .clone()
+                .unwrap_or_else(|| default_target_path())
+                .into(),
+        );
         ui.set_dark_mode(settings.dark_mode);
         ui.set_settings_show_tags(settings.show_tags);
         ui.set_settings_compact_cards(settings.compact_cards);
+        ui.set_find_duplicates(settings.scan_find_duplicates);
+        ui.set_enable_classification(settings.scan_classify_images);
+        ui.set_detect_low_resolution(settings.scan_detect_low_res);
+        ui.set_enable_feature_detection(settings.scan_feature_detection);
+        ui.set_rename_to_guid(settings.scan_rename_to_guid);
         if let Some(archive) = &settings.archive_path {
             ui.set_settings_archive_path(archive.clone().into());
         }
@@ -134,42 +162,51 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let state_clone = Arc::clone(&state);
         let ui_weak_clone = ui_weak.clone();
-        progress_timer.start(TimerMode::Repeated, std::time::Duration::from_millis(200), move || {
-            if let Ok(state_guard) = state_clone.lock() {
-                if let Some(progress_bar) = &state_guard.progress_bar {
-                    let pos = progress_bar.position();
-                    let len = progress_bar.length().unwrap_or(0);
+        progress_timer.start(
+            TimerMode::Repeated,
+            std::time::Duration::from_millis(200),
+            move || {
+                if let Ok(state_guard) = state_clone.lock() {
+                    if let Some(progress_bar) = &state_guard.progress_bar {
+                        let pos = progress_bar.position();
+                        let len = progress_bar.length().unwrap_or(0);
 
-                    // Get current phase message
-                    let phase_msg = state_guard.scan_phase.as_ref()
-                        .and_then(|p| p.lock().ok())
-                        .map(|s| s.clone())
-                        .unwrap_or_else(|| "Scanning".to_string());
+                        // Get current phase message
+                        let phase_msg = state_guard
+                            .scan_phase
+                            .as_ref()
+                            .and_then(|p| p.lock().ok())
+                            .map(|s| s.clone())
+                            .unwrap_or_else(|| "Scanning".to_string());
 
-                    if let Some(ui) = ui_weak_clone.upgrade() {
-                        // Update file counters
-                        ui.set_files_scanned(pos as i32);
-                        ui.set_files_total(len as i32);
+                        if let Some(ui) = ui_weak_clone.upgrade() {
+                            // Update file counters
+                            ui.set_files_scanned(pos as i32);
+                            ui.set_files_total(len as i32);
 
-                        // Update progress (0.0 to 1.0)
-                        if len > 0 {
-                            let progress = pos as f32 / len as f32;
-                            ui.set_scan_progress(progress);
-                        }
+                            // Update progress (0.0 to 1.0)
+                            if len > 0 {
+                                let progress = pos as f32 / len as f32;
+                                ui.set_scan_progress(progress);
+                            }
 
-                        // Update status text with phase and progress
-                        if len > 0 {
-                            ui.set_status_text(format!("{}: {} / {}", phase_msg, pos, len).into());
+                            // Update status text with phase and progress
+                            if len > 0 {
+                                ui.set_status_text(
+                                    format!("{}: {} / {}", phase_msg, pos, len).into(),
+                                );
+                            }
                         }
                     }
                 }
-            }
-        });
+            },
+        );
     }
 
     {
         let state = Arc::clone(&state);
         let ui_weak = ui_weak.clone();
+        let settings_clone = Arc::clone(&settings);
         ui.on_scan_requested(move || {
             if let Some(ui) = ui_weak.upgrade() {
                 let root_text = ui.get_root_path().trim().to_string();
@@ -182,6 +219,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 if !root_path.exists() {
                     ui.set_status_text("Root directory does not exist.".into());
                     return;
+                }
+
+                // Save scan settings before starting scan
+                if let Ok(mut settings_mut) = settings_clone.lock() {
+                    settings_mut.scan_find_duplicates = ui.get_find_duplicates();
+                    settings_mut.scan_classify_images = ui.get_enable_classification();
+                    settings_mut.scan_detect_low_res = ui.get_detect_low_resolution();
+                    settings_mut.scan_feature_detection = ui.get_enable_feature_detection();
+                    settings_mut.scan_rename_to_guid = ui.get_rename_to_guid();
+                    save_settings(&settings_mut);
                 }
 
                 if let Ok(mut state_mut) = state.lock() {
@@ -198,7 +245,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 let detect_low_resolution = ui.get_detect_low_resolution();
                 let enable_classification = ui.get_enable_classification();
                 let enable_feature_detection = ui.get_enable_feature_detection();
-                let config = build_scan_config(rename_to_guid, detect_low_resolution, enable_classification, enable_feature_detection);
+                let config = build_scan_config(
+                    rename_to_guid,
+                    detect_low_resolution,
+                    enable_classification,
+                    enable_feature_detection,
+                );
 
                 let ui_weak = ui_weak.clone();
                 let state = Arc::clone(&state);
@@ -375,7 +427,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                 file.selected = index != keep_index;
                                 file.is_keep_candidate = index == keep_index;
                             }
-                            group.reclaimable_bytes = group.files.iter()
+                            group.reclaimable_bytes = group
+                                .files
+                                .iter()
                                 .filter(|f| f.selected)
                                 .map(|f| f.size_bytes)
                                 .sum();
@@ -397,7 +451,9 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = ui_weak.upgrade() {
                 let archive_path_str = ui.get_settings_archive_path().to_string();
                 if archive_path_str.is_empty() {
-                    ui.set_status_text("Please set an archive path in Settings before archiving.".into());
+                    ui.set_status_text(
+                        "Please set an archive path in Settings before archiving.".into(),
+                    );
                     return;
                 }
                 let archive_path = PathBuf::from(archive_path_str);
@@ -405,7 +461,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 let selected: Vec<PathBuf> = state
                     .lock()
                     .map(|state| {
-                        state.groups.iter()
+                        state
+                            .groups
+                            .iter()
                             .flat_map(|group| &group.files)
                             .filter(|file| file.selected)
                             .map(|file| file.path.clone())
@@ -475,8 +533,18 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Gallery action callbacks (stubs for now)
     {
-        ui.on_gallery_photo_clicked(|_idx| {
-            // TODO: Implement photo preview modal
+        let state = Arc::clone(&state);
+        let ui_weak_photo = ui_weak.clone();
+        ui.on_gallery_photo_clicked(move |idx| {
+            if let Some(ui) = ui_weak_photo.upgrade() {
+                if let Ok(state_mut) = state.lock() {
+                    if let Some(photo) = state_mut.gallery_photos.get(idx as usize) {
+                        let photo_data = file_to_photo_data(photo, idx, -1);
+                        ui.set_preview_photo(photo_data);
+                        ui.set_show_preview_modal(true);
+                    }
+                }
+            }
         });
 
         ui.on_gallery_photo_toggle_selected(|_idx| {
@@ -540,6 +608,14 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_archive_others_in_group(|_idx| {
             // TODO: Archive all files in group except keep candidate
         });
+
+        // Preview modal callbacks
+        let ui_weak_clone = ui_weak.clone();
+        ui.on_preview_close(move || {
+            if let Some(ui) = ui_weak_clone.upgrade() {
+                ui.set_show_preview_modal(false);
+            }
+        });
     }
 
     ui.run()
@@ -562,7 +638,7 @@ fn perform_scan(
     progress_bar.set_style(
         ProgressStyle::default_bar()
             .template("{msg} [{bar:40}] {pos}/{len}")
-            .unwrap()
+            .unwrap(),
     );
     progress_bar.set_message("Scanning");
 
@@ -852,7 +928,8 @@ fn map_summary(summary: &ScanSummary) -> Vec<InternalGroup> {
 
             // Calculate group totals
             let total_size_bytes: u64 = files.iter().map(|f| f.size_bytes).sum();
-            let reclaimable_bytes: u64 = files.iter()
+            let reclaimable_bytes: u64 = files
+                .iter()
                 .filter(|f| f.selected)
                 .map(|f| f.size_bytes)
                 .sum();
@@ -985,7 +1062,6 @@ mod tests {
     }
 }
 
-
 fn ensure_largest_selected(groups: &mut [InternalGroup]) {
     for group in groups.iter_mut() {
         if group.files.is_empty() {
@@ -999,7 +1075,9 @@ fn ensure_largest_selected(groups: &mut [InternalGroup]) {
 
         // Recalculate group totals
         group.total_size_bytes = group.files.iter().map(|f| f.size_bytes).sum();
-        group.reclaimable_bytes = group.files.iter()
+        group.reclaimable_bytes = group
+            .files
+            .iter()
             .filter(|f| f.selected)
             .map(|f| f.size_bytes)
             .sum();
@@ -1055,7 +1133,29 @@ fn resolution_tier_to_int(tier: ResolutionTier) -> i32 {
 }
 
 // Convert InternalFile to PhotoData for new UI
+fn calculate_aspect_ratio(width: u32, height: u32) -> String {
+    if width == 0 || height == 0 {
+        return String::new();
+    }
+
+    // Calculate GCD to reduce fraction
+    fn gcd(mut a: u32, mut b: u32) -> u32 {
+        while b != 0 {
+            let temp = b;
+            b = a % b;
+            a = temp;
+        }
+        a
+    }
+
+    let divisor = gcd(width, height);
+    let w = width / divisor;
+    let h = height / divisor;
+    format!("{}:{}", w, h)
+}
+
 fn file_to_photo_data(file: &InternalFile, id: i32, group_id: i32) -> PhotoData {
+    let aspect_ratio = calculate_aspect_ratio(file.dimensions.0, file.dimensions.1);
     PhotoData {
         id,
         display_name: SharedString::from(file.display_name.clone()),
@@ -1070,6 +1170,7 @@ fn file_to_photo_data(file: &InternalFile, id: i32, group_id: i32) -> PhotoData 
         orientation: file.orientation,
         moderation_tier: SharedString::from(file.moderation_tier.clone()),
         tags: SharedString::from(file.tags.clone()),
+        aspect_ratio: SharedString::from(aspect_ratio),
         is_keep_candidate: file.is_keep_candidate,
         group_id,
     }
@@ -1108,13 +1209,15 @@ fn build_duplicate_groups_model(groups: &[InternalGroup]) -> ModelRc<DuplicateGr
 fn calculate_duplicate_stats(groups: &[InternalGroup]) -> DuplicateStats {
     let total_groups = groups.len() as i32;
     let total_files: i32 = groups.iter().map(|g| g.files.len() as i32).sum();
-    let total_duplicates = groups.iter()
+    let total_duplicates = groups
+        .iter()
         .filter(|g| g.files.len() > 1)
         .map(|g| (g.files.len() - 1) as i32)
         .sum();
     let reclaimable_bytes: u64 = groups.iter().map(|g| g.reclaimable_bytes).sum();
     let reclaimable_mb = (reclaimable_bytes as f64) / (1024.0 * 1024.0);
-    let selected_count: i32 = groups.iter()
+    let selected_count: i32 = groups
+        .iter()
         .flat_map(|g| &g.files)
         .filter(|f| f.selected)
         .count() as i32;
@@ -1140,7 +1243,10 @@ fn build_gallery_photos_model(photos: &[InternalFile]) -> ModelRc<PhotoData> {
 }
 
 // Calculate GalleryStats
-fn calculate_gallery_stats(all_photos: &[InternalFile], filtered_photos: &[InternalFile]) -> GalleryStats {
+fn calculate_gallery_stats(
+    all_photos: &[InternalFile],
+    filtered_photos: &[InternalFile],
+) -> GalleryStats {
     let total_photos = all_photos.len() as i32;
     let filtered_photos_count = filtered_photos.len() as i32;
     let selected_count = filtered_photos.iter().filter(|f| f.selected).count() as i32;
@@ -1198,8 +1304,7 @@ fn apply_gallery_filters(
             }
         })
         .filter(|p| {
-            tag_search.is_empty()
-                || p.tags.to_lowercase().contains(&tag_search.to_lowercase())
+            tag_search.is_empty() || p.tags.to_lowercase().contains(&tag_search.to_lowercase())
         })
         .cloned()
         .collect()
@@ -1216,7 +1321,7 @@ fn format_status(state: &AppState) -> String {
         file_count += group.files.len();
         selected_count += group.files.iter().filter(|file| file.selected).count();
     }
-    
+
     let time_info = if let Some(d) = state.last_scan_duration {
         format!(" • Time: {:.2}s", d.as_secs_f64())
     } else {
@@ -1229,7 +1334,12 @@ fn format_status(state: &AppState) -> String {
     )
 }
 
-fn build_scan_config(rename_to_guid: bool, detect_low_resolution: bool, enable_classification: bool, enable_feature_detection: bool) -> ScanConfig {
+fn build_scan_config(
+    rename_to_guid: bool,
+    detect_low_resolution: bool,
+    enable_classification: bool,
+    enable_feature_detection: bool,
+) -> ScanConfig {
     let mut config = ScanConfig::new(default_extensions(), ThreadingMode::Parallel);
     if let Some(mut dir) = dirs::data_local_dir() {
         dir.push("Camden");
@@ -1305,4 +1415,3 @@ fn load_thumbnail(path: &Path) -> Option<Image> {
         None
     })
 }
-

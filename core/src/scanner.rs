@@ -1,5 +1,7 @@
 use crate::classifier::{self, ClassifierConfig, ImageClassifier};
-use crate::detector::{DetectorConfig, DuplicateDetector, ImageAnalysis, ImageFeatures, ImageMetadata, MatchResult};
+use crate::detector::{
+    DetectorConfig, DuplicateDetector, ImageAnalysis, ImageFeatures, ImageMetadata, MatchResult,
+};
 use crate::rename::ensure_guid_name;
 use crate::resolution::{resolution_tier, ResolutionTier};
 use crate::thumbnails::ThumbnailCache;
@@ -165,7 +167,7 @@ pub fn scan(
     let classifier: Option<Arc<Mutex<ImageClassifier>>> = if config.enable_classification {
         // Load classifier configuration
         let classifier_config = ClassifierConfig::load_or_default();
-        
+
         // Initialize ONNX Runtime
         let ort_path = &classifier_config.ort_library;
         if let Err(e) = classifier::init_ort_runtime(ort_path) {
@@ -193,12 +195,24 @@ pub fn scan(
     }
 
     let groups = match config.threading {
-        ThreadingMode::Parallel => {
-            scan_parallel(root, config, progress_bar, phase, &detector, &cache, &classifier)
-        }
-        ThreadingMode::Sequential => {
-            scan_sequential(root, config, progress_bar, phase, &detector, &cache, &classifier)
-        }
+        ThreadingMode::Parallel => scan_parallel(
+            root,
+            config,
+            progress_bar,
+            phase,
+            &detector,
+            &cache,
+            &classifier,
+        ),
+        ThreadingMode::Sequential => scan_sequential(
+            root,
+            config,
+            progress_bar,
+            phase,
+            &detector,
+            &cache,
+            &classifier,
+        ),
     };
 
     ScanSummary { groups }
@@ -217,7 +231,14 @@ fn scan_parallel(
         .into_iter()
         .par_bridge()
         .filter_map(|entry| {
-            handle_entry(entry, config, progress_bar, detector, cache.as_deref(), classifier)
+            handle_entry(
+                entry,
+                config,
+                progress_bar,
+                detector,
+                cache.as_deref(),
+                classifier,
+            )
         })
         .fold(Vec::new, |mut collection, record| {
             collection.push(record);
@@ -243,9 +264,14 @@ fn scan_sequential(
 ) -> Vec<DuplicateGroup> {
     let mut records = Vec::new();
     for entry in WalkDir::new(root) {
-        if let Some(record) =
-            handle_entry(entry, config, progress_bar, detector, cache.as_deref(), classifier)
-        {
+        if let Some(record) = handle_entry(
+            entry,
+            config,
+            progress_bar,
+            detector,
+            cache.as_deref(),
+            classifier,
+        ) {
             records.push(record);
         }
     }
@@ -371,7 +397,11 @@ fn classify_and_tag(
             metadata.moderation_tier = Some(flags.tier.to_string());
         }
         Err(e) => {
-            eprintln!("Moderation classification failed for {}: {}", path.display(), e);
+            eprintln!(
+                "Moderation classification failed for {}: {}",
+                path.display(),
+                e
+            );
             progress_bar.set_message(format!("Moderation error: {}", e));
         }
     }
@@ -520,9 +550,11 @@ fn could_be_crop_related(dims_a: (i32, i32), dims_b: (i32, i32)) -> bool {
     let tolerance = 1.1; // 10% size tolerance
 
     // Check if A could be a crop of B (A smaller or equal)
-    let a_in_b = (w_a as f32) <= (w_b as f32 * tolerance) && (h_a as f32) <= (h_b as f32 * tolerance);
+    let a_in_b =
+        (w_a as f32) <= (w_b as f32 * tolerance) && (h_a as f32) <= (h_b as f32 * tolerance);
     // Check if B could be a crop of A (B smaller or equal)
-    let b_in_a = (w_b as f32) <= (w_a as f32 * tolerance) && (h_b as f32) <= (h_a as f32 * tolerance);
+    let b_in_a =
+        (w_b as f32) <= (w_a as f32 * tolerance) && (h_b as f32) <= (h_a as f32 * tolerance);
 
     a_in_b || b_in_a
 }
@@ -555,13 +587,23 @@ fn merge_crop_groups(
         if groups[i].features.visual.is_none() {
             continue;
         }
-        let dims_i = groups[i].features.visual.as_ref().unwrap().source_dimensions;
+        let dims_i = groups[i]
+            .features
+            .visual
+            .as_ref()
+            .unwrap()
+            .source_dimensions;
 
         for j in (i + 1)..groups.len() {
             if groups[j].features.visual.is_none() {
                 continue;
             }
-            let dims_j = groups[j].features.visual.as_ref().unwrap().source_dimensions;
+            let dims_j = groups[j]
+                .features
+                .visual
+                .as_ref()
+                .unwrap()
+                .source_dimensions;
 
             // Only compare if dimensions suggest possible crop relationship
             if could_be_crop_related(dims_i, dims_j) {

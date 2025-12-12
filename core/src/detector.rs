@@ -1,9 +1,9 @@
 use kamadak_exif::{In, Reader, Tag};
 use opencv::core::{
     self, AlgorithmHint, DMatch, KeyPoint, Mat, MatTraitConst, MatTraitConstManual, Point2f,
-    Scalar, Size, Vector, NORM_HAMMING, CV_8U,
+    Scalar, Size, Vector, CV_8U, NORM_HAMMING,
 };
-use opencv::features2d::{BFMatcher, Feature2DTrait, ORB, ORB_ScoreType};
+use opencv::features2d::{BFMatcher, Feature2DTrait, ORB_ScoreType, ORB};
 use opencv::imgcodecs;
 use opencv::imgproc;
 use opencv::prelude::{DescriptorMatcherTraitConst, KeyPointTraitConst, MatTrait};
@@ -85,11 +85,11 @@ impl Default for DetectorConfig {
             // Tuned for ~95-98% confidence to minimize false positives
             // Performance-optimized: 250 features instead of 500 for 2x faster matching
             enable_feature_detection: false,
-            orb_max_features: 250,         // Was 500 - fewer features = faster matching
-            min_match_count: 15,           // Was 25 - adjusted for fewer features
-            ransac_reproj_threshold: 3.0,  // Tight geometric consistency
-            nn_match_ratio: 0.70,          // Was 0.65 - slightly relaxed for fewer features
-            min_inlier_ratio: 0.40,        // Was 0.50 - slightly relaxed for fewer features
+            orb_max_features: 250, // Was 500 - fewer features = faster matching
+            min_match_count: 15,   // Was 25 - adjusted for fewer features
+            ransac_reproj_threshold: 3.0, // Tight geometric consistency
+            nn_match_ratio: 0.70,  // Was 0.65 - slightly relaxed for fewer features
+            min_inlier_ratio: 0.40, // Was 0.50 - slightly relaxed for fewer features
         }
     }
 }
@@ -133,7 +133,7 @@ impl DuplicateDetector {
         let visual = if self.config.enable_feature_detection {
             match extract_visual_features(&grayscale, self.config.orb_max_features) {
                 Ok(v) if v.keypoints.len() >= self.config.min_match_count => Some(v),
-                Ok(_) => None, // Insufficient keypoints, skip
+                Ok(_) => None,  // Insufficient keypoints, skip
                 Err(_) => None, // Graceful degradation on error
             }
         } else {
@@ -329,17 +329,20 @@ fn vector_distance(left: &[f64; 3], right: &[f64; 3]) -> f64 {
 
 /// Extracts ORB keypoints and descriptors from a grayscale image.
 /// This function is thread-safe - each call creates its own ORB detector.
-fn extract_visual_features(grayscale: &Mat, max_features: i32) -> Result<VisualFeatures, DetectionError> {
+fn extract_visual_features(
+    grayscale: &Mat,
+    max_features: i32,
+) -> Result<VisualFeatures, DetectionError> {
     let mut orb = ORB::create(
         max_features,
-        1.2,  // scaleFactor
-        8,    // nlevels
-        31,   // edgeThreshold
-        0,    // firstLevel
-        2,    // WTA_K
+        1.2, // scaleFactor
+        8,   // nlevels
+        31,  // edgeThreshold
+        0,   // firstLevel
+        2,   // WTA_K
         ORB_ScoreType::HARRIS_SCORE,
-        31,   // patchSize
-        20,   // fastThreshold
+        31, // patchSize
+        20, // fastThreshold
     )
     .map_err(DetectionError::OpenCv)?;
 
@@ -396,8 +399,7 @@ fn descriptors_to_mat(features: &VisualFeatures) -> Result<Mat, DetectionError> 
 
     // Create Mat and copy data into it
     let mut mat = unsafe {
-        Mat::new_rows_cols(rows as i32, cols as i32, CV_8U)
-            .map_err(DetectionError::OpenCv)?
+        Mat::new_rows_cols(rows as i32, cols as i32, CV_8U).map_err(DetectionError::OpenCv)?
     };
 
     // Copy descriptor data into the Mat
@@ -515,8 +517,8 @@ fn is_crop_match(
     };
 
     let inlier_ratio = inlier_count as f32 / match_count as f32;
-    let is_match = inlier_count >= config.min_match_count
-        && inlier_ratio >= config.min_inlier_ratio;
+    let is_match =
+        inlier_count >= config.min_match_count && inlier_ratio >= config.min_inlier_ratio;
 
     Ok((is_match, inlier_count, match_count))
 }

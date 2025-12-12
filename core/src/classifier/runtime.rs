@@ -60,9 +60,8 @@ pub fn load_session(model_path: &Path) -> Result<Session, ClassifierError> {
     }
 
     // Read model file into memory
-    let model_bytes = std::fs::read(model_path).map_err(|e| {
-        ClassifierError::Processing(format!("failed to read model file: {}", e))
-    })?;
+    let model_bytes = std::fs::read(model_path)
+        .map_err(|e| ClassifierError::Processing(format!("failed to read model file: {}", e)))?;
 
     Session::builder()
         .map_err(ClassifierError::Ort)?
