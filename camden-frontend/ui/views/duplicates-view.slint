@@ -345,16 +345,19 @@ export component DuplicatesView inherits Rectangle {
             horizontal-stretch: 1;
 
             VerticalLayout {
-                padding: 16px;
+                padding-top: 16px;
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-bottom: 0px;
                 spacing: 0px;
+                vertical-stretch: 1;
 
-                // Header and content
                 Rectangle {
                     vertical-stretch: 1;
+                    clip: true;
 
                     VerticalLayout {
                         spacing: 12px;
-                        padding-bottom: 12px;
 
                         // Header
                         HorizontalLayout {
@@ -424,6 +427,9 @@ export component DuplicatesView inherits Rectangle {
 
                         // Groups list
                         if groups.length > 0 : ScrollView {
+                            horizontal-stretch: 1;
+                            vertical-stretch: 1;
+
                             VerticalLayout {
                                 spacing: 12px;
 
@@ -443,6 +449,7 @@ export component DuplicatesView inherits Rectangle {
                 // Zoom slider section
                 Rectangle {
                     height: 40px;
+                    margin-top: 16px;
                     background: Theme.colors.bg_card;
                     border-width: 1px;
                     border-color: Theme.colors.border_default;

@@ -1,0 +1,100 @@
+version: '3'
+
+tasks:
+  preflight-linux:
+    silent: true
+    platforms: [linux]
+    preconditions:
+      - sh: test -f /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+        msg: "wsl powershell not found"
+      - sh: test -f scripts/wsl-task.sh
+        msg: "scripts/wsl-task.sh script not found"
+
+  # ============ BUILD/CHECK/TEST ============
+
+  check:
+    deps: [preflight-linux]
+    silent: true
+    cmds:
+      - cmd: cargo check --workspace --all-targets
+        platforms: [windows]
+      - cmd: scripts/wsl-task.sh {{ .TASK }}
+        platforms: [linux]
+
+  fmt:
+    deps: [preflight-linux]
+    cmds:
+      - cmd: cargo fmt --all -- --check
+        platforms: [windows]
+      - cmd: scripts/wsl-task.sh {{ .TASK }}
+        platforms: [linux]
+
+  coverage:
+    deps: [preflight-linux]
+    env:
+      CARGO_TARGET_DIR: ./target/coverage  # Separate from dev
+    cmds:
+      - cmd: cargo tarpaulin --workspace --all-features --out Xml --lib --bins
+        platforms: [windows]
+      - cmd: scripts/wsl-task.sh {{ .TASK }}
+        platforms: [linux]
+
+  clippy:
+    deps: [preflight-linux]
+    cmds:
+      - cmd: cargo clippy --workspace --all-targets -- -D warnings
+        platforms: [windows]
+      - cmd: scripts/wsl-task.sh {{ .TASK }}
+        platforms: [linux]
+
+  test:
+    deps: [preflight-linux]
+    silent: true
+    cmds:
+      - cmd: cargo test --workspace --all-targets --all-features
+        platforms: [windows]
+      - cmd: scripts/wsl-task.sh {{ .TASK }}
+        platforms: [linux]
+
+  frontend:
+    desc: Run the Slint frontend application
+    deps: [preflight-linux]
+    cmds:
+      - cmd: cargo run -p camden-frontend
+        platforms: [windows]
+      - cmd: scripts/wsl-task.sh {{ .TASK }}
+        platforms: [linux]
+
+  build:
+    desc: Build with static OpenCV (bumps build number)
+    deps: [preflight-linux]
+    silent: true
+    cmds:
+      - task: bump-build
+      - cmd: cargo build --workspace
+        platforms: [windows]
+      - cmd: scripts/wsl-task.sh build
+        platforms: [linux]
+
+  release:
+    desc: Release build with static OpenCV (bumps patch version)
+    deps: [preflight-linux]
+    silent: true
+    cmds:
+      - task: bump-patch
+      - cmd: cargo build --workspace --release
+        platforms: [windows]
+      - cmd: scripts/wsl-task.sh {{ .TASK }}
+        platforms: [linux]
+
+  run:
+    desc: Run the camden cli application with the given arguments
+    deps: [preflight-linux]
+    silent: true
+    vars:
+      ARGS: "{{ .CLI_ARGS | default \"--help\" }}"
+    cmds:
+      - cmd: cargo run -p camden -- {{ .ARGS }}
+        platforms: [windows]
+      - cmd: scripts/wsl-task.sh {{ .TASK }}
+        platforms: [linux]

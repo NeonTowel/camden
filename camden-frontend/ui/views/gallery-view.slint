@@ -49,12 +49,12 @@ export component GalleryView inherits Rectangle {
     callback select-all();
     callback deselect-all();
 
-    // Responsive grid settings - simplify to avoid binding loops
-    // Use 4 columns by default - responsive design will adapt card sizes within grid
-    property <int> columns_count: 4;
-
-    // Card sizing defaults (can be overridden by scroll view width)
-    property <length> card_width: 160px;
+    // Responsive grid helpers
+    property <length> grid_padding: 12px;
+    property <length> card_spacing: 12px;
+    property <length> min_card_width: 160px;
+    property <length> max_card_width: 320px;
+    property <int> max_columns: 6;
     property <length> card_height: 260px;
 
     background: Theme.colors.bg_secondary;
@@ -80,6 +80,7 @@ export component GalleryView inherits Rectangle {
         // Main content area
         Rectangle {
             horizontal-stretch: 1;
+            vertical-stretch: 1;
             background: Theme.colors.bg_card;
 
             VerticalLayout {
@@ -320,38 +321,40 @@ export component GalleryView inherits Rectangle {
                     }
                 }
 
-                // Photo grid with improved layout - supports 4-6 columns
+                // Photo grid - responsive, fills the view while respecting minimum card size
                 if photos.length > 0 : ScrollView {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
+                    clip: true;
 
-                    VerticalLayout {
-                        width: 100%;
-                        spacing: 12px;
-                        padding: 0px;
-                        padding-bottom: 16px;
-                        alignment: start;
+                    // Layout helpers
+                    property <length> inner_width: max(0px, width - grid_padding * 2);
+                    property <float> column_unit: (min_card_width + card_spacing) / 1px;
+                    property <float> raw_columns: inner_width == 0px ? 1.0 : (inner_width / 1px + (card_spacing / 1px)) / column_unit;
+                    property <int> columns_count: max(1, min(max_columns, floor(raw_columns)));
+                    property <length> target_card_width: columns_count == 0 ? min_card_width : (inner_width - (columns_count - 1) * card_spacing) / columns_count;
+                    property <length> card_width: max(min_card_width, min(max_card_width, target_card_width));
+                    property <float> row_divider: photos.length == 0 ? 0.0 : (photos.length - 1) / columns_count;
+                    property <int> grid_rows: photos.length == 0 ? 0 : floor(row_divider) + 1;
+                    property <length> content_height: grid_padding * 2 + grid_rows * card_height + max(0, grid_rows - 1) * card_spacing;
+                    property <length> content_width: max(width, grid_padding * 2 + columns_count * card_width + max(0, columns_count - 1) * card_spacing);
+                    viewport-width: content_width;
+                    viewport-height: content_height;
 
-                        // Wrap photos in responsive rows (4 columns, scales naturally with parent)
-                        for row-start in [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96, 100] : HorizontalLayout {
-                            spacing: 12px;
-                            visible: row-start < photos.length;
-                            horizontal-stretch: 1;
+                    Rectangle {
+                        width: content_width;
+                        height: content_height;
+                        clip: true;
 
-                            for col in [0, 1, 2, 3] : Rectangle {
-                                visible: (row-start + col) < photos.length;
-                                width: self.visible ? card_width : 0px;
-                                height: card_height;
-
-                                if (row-start + col) < photos.length : PhotoCard {
-                                    photo: photos[row-start + col];
-                                    show-selection: true;
-                                    clicked => { photo-clicked(row-start + col); }
-                                    toggle-selected => { photo-toggle-selected(row-start + col); }
-                                }
-                            }
-
-                            Rectangle { horizontal-stretch: 1; }
+                        for photo[index] in photos : PhotoCard {
+                            width: card_width;
+                            height: card_height;
+                            x: grid_padding + (index % columns_count) * (card_width + card_spacing);
+                            y: grid_padding + floor(index / columns_count) * (card_height + card_spacing);
+                            photo: photo;
+                            show-selection: true;
+                            clicked => { photo-clicked(index); }
+                            toggle-selected => { photo-toggle-selected(index); }
                         }
                     }
                 }

@@ -1,0 +1,186 @@
+version: '3'
+
+tasks:
+  # ============ VERSION MANAGEMENT ============
+
+  version:
+    desc: Display current version
+    silent: true
+    cmds:
+      - |
+        if [ -f "VERSION.toml" ]; then
+          while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+              major\ =\ *) MAJOR="${line#*= }" ;;
+              minor\ =\ *) MINOR="${line#*= }" ;;
+              patch\ =\ *) PATCH="${line#*= }" ;;
+              build\ =\ *) BUILD="${line#*= }" ;;
+            esac
+          done < VERSION.toml
+          echo "v${MAJOR}.${MINOR}.${PATCH} (build ${BUILD})"
+        else
+          echo "VERSION.toml not found"
+          exit 1
+        fi
+
+  sync-cargo-versions:
+    desc: Sync VERSION.toml version to all Cargo.toml files
+    silent: true
+    cmds:
+      - |
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            major\ =\ *) MAJOR="${line#*= }" ;;
+            minor\ =\ *) MINOR="${line#*= }" ;;
+            patch\ =\ *) PATCH="${line#*= }" ;;
+          esac
+        done < VERSION.toml
+        VERSION="${MAJOR}.${MINOR}.${PATCH}"
+
+        for CARGO in Cargo.toml core/Cargo.toml camden-frontend/Cargo.toml; do
+          if [ -f "$CARGO" ]; then
+            TMPFILE="${CARGO}.tmp"
+            while IFS= read -r line || [ -n "$line" ]; do
+              case "$line" in
+                version\ =\ \"*) echo "version = \"${VERSION}\"" ;;
+                *) echo "$line" ;;
+              esac
+            done < "$CARGO" > "$TMPFILE"
+            mv "$TMPFILE" "$CARGO"
+          fi
+        done
+
+        echo "Cargo.toml files synced to version ${VERSION}"
+
+  bump-build:
+    desc: Increment build number (for development builds)
+    silent: true
+    cmds:
+      - |
+        if [ ! -f "VERSION.toml" ]; then
+          echo "VERSION.toml not found, creating..."
+          printf "[version]\nmajor = 0\nminor = 1\npatch = 0\nbuild = 0\n" > VERSION.toml
+        fi
+
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            build\ =\ *) BUILD="${line#*= }" ;;
+          esac
+        done < VERSION.toml
+        NEW_BUILD=$((BUILD + 1))
+
+        TMPFILE="VERSION.toml.tmp"
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            build\ =\ *) echo "build = ${NEW_BUILD}" ;;
+            *) echo "$line" ;;
+          esac
+        done < VERSION.toml > "$TMPFILE"
+        mv "$TMPFILE" VERSION.toml
+
+        echo "Build number bumped: ${BUILD} -> ${NEW_BUILD}"
+      - task: sync-cargo-versions
+
+  bump-patch:
+    desc: Increment patch version (0.0.X) with auto-promotion at 10 patches
+    silent: true
+    cmds:
+      - |
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            major\ =\ *) MAJOR="${line#*= }" ;;
+            minor\ =\ *) MINOR="${line#*= }" ;;
+            patch\ =\ *) PATCH="${line#*= }" ;;
+          esac
+        done < VERSION.toml
+
+        NEW_PATCH=$((PATCH + 1))
+        NEW_MINOR=$MINOR
+        NEW_MAJOR=$MAJOR
+
+        if [ $NEW_PATCH -eq 10 ]; then
+          NEW_PATCH=0
+          NEW_MINOR=$((MINOR + 1))
+          if [ $NEW_MINOR -eq 10 ]; then
+            NEW_MINOR=0
+            NEW_MAJOR=$((MAJOR + 1))
+          fi
+        fi
+
+        TMPFILE="VERSION.toml.tmp"
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            major\ =\ *) echo "major = ${NEW_MAJOR}" ;;
+            minor\ =\ *) echo "minor = ${NEW_MINOR}" ;;
+            patch\ =\ *) echo "patch = ${NEW_PATCH}" ;;
+            build\ =\ *) echo "build = 1" ;;
+            *) echo "$line" ;;
+          esac
+        done < VERSION.toml > "$TMPFILE"
+        mv "$TMPFILE" VERSION.toml
+
+        echo "Patch bumped: ${MAJOR}.${MINOR}.${PATCH} -> ${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}, build reset to 1"
+      - task: sync-cargo-versions
+
+  bump-minor:
+    desc: Increment minor version (0.X.0) with auto-promotion at 10 minors
+    silent: true
+    cmds:
+      - |
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            major\ =\ *) MAJOR="${line#*= }" ;;
+            minor\ =\ *) MINOR="${line#*= }" ;;
+          esac
+        done < VERSION.toml
+
+        NEW_MINOR=$((MINOR + 1))
+        NEW_MAJOR=$MAJOR
+
+        if [ $NEW_MINOR -eq 10 ]; then
+          NEW_MINOR=0
+          NEW_MAJOR=$((MAJOR + 1))
+        fi
+
+        TMPFILE="VERSION.toml.tmp"
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            major\ =\ *) echo "major = ${NEW_MAJOR}" ;;
+            minor\ =\ *) echo "minor = ${NEW_MINOR}" ;;
+            patch\ =\ *) echo "patch = 0" ;;
+            build\ =\ *) echo "build = 1" ;;
+            *) echo "$line" ;;
+          esac
+        done < VERSION.toml > "$TMPFILE"
+        mv "$TMPFILE" VERSION.toml
+
+        echo "Minor version bumped: ${MAJOR}.${MINOR} -> ${NEW_MAJOR}.${NEW_MINOR}, patch reset to 0, build reset to 1"
+      - task: sync-cargo-versions
+
+  bump-major:
+    desc: Increment major version (X.0.0) and reset minor/patch/build
+    silent: true
+    cmds:
+      - |
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            major\ =\ *) MAJOR="${line#*= }" ;;
+          esac
+        done < VERSION.toml
+        NEW_MAJOR=$((MAJOR + 1))
+
+        TMPFILE="VERSION.toml.tmp"
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            major\ =\ *) echo "major = ${NEW_MAJOR}" ;;
+            minor\ =\ *) echo "minor = 0" ;;
+            patch\ =\ *) echo "patch = 0" ;;
+            build\ =\ *) echo "build = 1" ;;
+            *) echo "$line" ;;
+          esac
+        done < VERSION.toml > "$TMPFILE"
+        mv "$TMPFILE" VERSION.toml
+
+        echo "Major version bumped: ${MAJOR} -> ${NEW_MAJOR}"
+      - task: sync-cargo-versions
+

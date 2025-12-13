@@ -15,6 +15,34 @@ Always use `task` commands (not direct cargo) to load environment variables:
 | `task fmt`      | Format code        |
 | `task frontend` | Launch Slint GUI   |
 
+### WSL Development (Cross-Compile to Windows)
+
+For Linux tooling productivity, develop in WSL while targeting Windows:
+
+**One-time setup (in WSL):**
+```bash
+# Install Rust and Windows target
+rustup target add x86_64-pc-windows-msvc
+
+# Install xwin for MSVC SDK
+cargo install xwin
+xwin --accept-license splat --output ~/.xwin
+
+# Update .cargo/config.toml: replace <user> with your WSL username
+```
+
+**Daily workflow (in WSL):**
+```bash
+task -t taskfile.wsl.yaml check    # Fast syntax check
+task -t taskfile.wsl.yaml build    # Cross-compile to Windows
+task -t taskfile.wsl.yaml clippy   # Linting
+```
+
+**Testing:** Run the `.exe` from Windows PowerShell:
+```powershell
+.\target\x86_64-pc-windows-msvc\debug\camden.exe --help
+```
+
 ## Project Structure
 
 Three-crate Rust workspace:
