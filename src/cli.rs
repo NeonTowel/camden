@@ -20,6 +20,7 @@ pub struct CliConfig {
     pub detect_low_resolution: bool,
     pub enable_classification: bool,
     pub enable_feature_detection: bool,
+    pub prefer_display_aspect_ratios: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -33,6 +34,7 @@ pub struct PreviewConfig {
     pub detect_low_resolution: bool,
     pub enable_classification: bool,
     pub enable_feature_detection: bool,
+    pub prefer_display_aspect_ratios: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -89,6 +91,7 @@ impl CliConfig {
         let mut detect_low_resolution = false;
         let mut enable_classification = false;
         let mut enable_feature_detection = false;
+        let mut prefer_display_aspect_ratios = false;
 
         for arg in args.by_ref() {
             if arg.starts_with("--") {
@@ -110,6 +113,10 @@ impl CliConfig {
                 }
                 if arg == "--enable-feature-detection" || arg == "--feature-detection" {
                     enable_feature_detection = true;
+                    continue;
+                }
+                if arg == "--prefer-display-aspect-ratios" {
+                    prefer_display_aspect_ratios = true;
                     continue;
                 }
                 if let Some(value) = arg.strip_prefix("--target=") {
@@ -147,6 +154,7 @@ impl CliConfig {
             detect_low_resolution,
             enable_classification,
             enable_feature_detection,
+            prefer_display_aspect_ratios,
         })
     }
 }
@@ -164,6 +172,7 @@ impl PreviewConfig {
         let mut detect_low_resolution = false;
         let mut enable_classification = false;
         let mut enable_feature_detection = false;
+        let mut prefer_display_aspect_ratios = false;
 
         for arg in args.by_ref() {
             if arg.starts_with("--") {
@@ -185,6 +194,10 @@ impl PreviewConfig {
                 }
                 if arg == "--enable-feature-detection" || arg == "--feature-detection" {
                     enable_feature_detection = true;
+                    continue;
+                }
+                if arg == "--prefer-display-aspect-ratios" {
+                    prefer_display_aspect_ratios = true;
                     continue;
                 }
                 if let Some(value) = arg.strip_prefix("--root=") {
@@ -230,6 +243,7 @@ impl PreviewConfig {
             detect_low_resolution,
             enable_classification,
             enable_feature_detection,
+            prefer_display_aspect_ratios,
         })
     }
 
@@ -282,6 +296,7 @@ COMMON OPTIONS:
     --classify                  Alias for --enable-classification
     --enable-feature-detection  Enable feature-based detection for crops (slower)
     --feature-detection         Alias for --enable-feature-detection
+    --prefer-display-aspect-ratios Prefer originals with standard aspect ratios (e.g., 16:9)
     -h, --help                  Show this help message
     -V, --version               Show version information
 

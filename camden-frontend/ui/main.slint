@@ -62,6 +62,7 @@ export component MainWindow inherits Window {
     in-out property <bool> detect_low_resolution: true;
     in-out property <bool> enable_classification: false;
     in-out property <bool> enable_feature_detection: true;
+    in-out property <bool> prefer_display_aspect_ratios: false;
     in-out property <string> current_scan_file: "";
     in-out property <int> files_scanned: 0;
     in-out property <int> files_total: 0;
@@ -203,6 +204,7 @@ export component MainWindow inherits Window {
                 detect-low-res <=> detect_low_resolution;
                 feature-detection <=> enable_feature_detection;
                 rename-to-guid <=> rename_to_guid;
+                prefer-display-aspect-ratios <=> prefer_display_aspect_ratios;
                 scanning: scanning;
                 progress: scan_progress;
                 current-file: current_scan_file;
@@ -251,6 +253,7 @@ export component MainWindow inherits Window {
                 show-restricted <=> filter_show_restricted;
                 tag-search <=> filter_tag_search;
                 available-tags: available_tags;
+                zoom-level <=> zoom_level;
 
                 photo-clicked(idx) => { gallery_photo_clicked(idx); }
                 photo-toggle-selected(idx) => { gallery_photo_toggle_selected(idx); }

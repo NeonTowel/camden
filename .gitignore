@@ -8,3 +8,8 @@ vcpkg_installed
 identical_files.json
 camden-classifier.toml
 progress.md
+AGENTS.md
+GEMINI.md
+CLAUDE.md
+.claude
+TODO.md

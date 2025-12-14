@@ -1,3 +1,4 @@
+use crate::aspect_ratio::is_standard_aspect_ratio;
 use crate::classifier::{self, ClassifierConfig, ImageClassifier};
 use crate::detector::{
     DetectorConfig, DuplicateDetector, ImageAnalysis, ImageFeatures, ImageMetadata, MatchResult,
@@ -35,6 +36,8 @@ pub struct ScanConfig {
     pub enable_classification: bool,
     /// When true, enables feature-based detection using ORB + RANSAC (finds crops).
     pub enable_feature_detection: bool,
+    /// When true, prefers originals with standard display aspect ratios (e.g., 16:9).
+    pub prefer_display_aspect_ratios: bool,
 }
 
 impl ScanConfig {
@@ -48,6 +51,7 @@ impl ScanConfig {
             detect_low_resolution: false,
             enable_classification: false,
             enable_feature_detection: false,
+            prefer_display_aspect_ratios: false,
         }
     }
 
@@ -73,6 +77,11 @@ impl ScanConfig {
 
     pub fn with_feature_detection(mut self, enabled: bool) -> Self {
         self.enable_feature_detection = enabled;
+        self
+    }
+
+    pub fn with_prefer_display_aspect_ratios(mut self, enabled: bool) -> Self {
+        self.prefer_display_aspect_ratios = enabled;
         self
     }
 }
@@ -250,7 +259,7 @@ fn scan_parallel(
         });
 
     progress_bar.set_message("Grouping duplicates...");
-    group_records(records, detector, progress_bar, phase)
+    group_records(records, detector, progress_bar, phase, config)
 }
 
 fn scan_sequential(
@@ -276,7 +285,7 @@ fn scan_sequential(
         }
     }
     progress_bar.set_message("Grouping duplicates...");
-    group_records(records, detector, progress_bar, phase)
+    group_records(records, detector, progress_bar, phase, config)
 }
 
 /// Validate and optionally rename a file to GUID format.
@@ -490,6 +499,7 @@ fn group_records(
     detector: &DuplicateDetector,
     progress_bar: &ProgressBar,
     phase: Option<&Arc<Mutex<String>>>,
+    config: &ScanConfig,
 ) -> Vec<DuplicateGroup> {
     // Update phase for grouping
     if let Some(phase) = phase {
@@ -505,11 +515,32 @@ fn group_records(
     }
 
     // Phase 2: Merge crop-related groups if feature detection is enabled
-    let groups = if detector.config().enable_feature_detection {
+    let mut groups = if detector.config().enable_feature_detection {
         merge_crop_groups(groups, detector, progress_bar, phase)
     } else {
         groups
     };
+
+    // Phase 3: Sort entries within each group according to preferences
+    if config.prefer_display_aspect_ratios {
+        for group in &mut groups {
+            group.entries.sort_by(|a, b| {
+                let is_a_standard =
+                    is_standard_aspect_ratio(a.metadata.dimensions.0, a.metadata.dimensions.1);
+                let is_b_standard =
+                    is_standard_aspect_ratio(b.metadata.dimensions.0, b.metadata.dimensions.1);
+
+                is_b_standard
+                    .cmp(&is_a_standard)
+                    .then_with(|| {
+                        let res_a = a.metadata.dimensions.0 as u64 * a.metadata.dimensions.1 as u64;
+                        let res_b = b.metadata.dimensions.0 as u64 * b.metadata.dimensions.1 as u64;
+                        res_b.cmp(&res_a)
+                    })
+                    .then_with(|| b.metadata.size_bytes.cmp(&a.metadata.size_bytes))
+            });
+        }
+    }
 
     groups
         .into_iter()

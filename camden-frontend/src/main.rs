@@ -71,6 +71,7 @@ struct AppSettings {
     scan_detect_low_res: bool,
     scan_feature_detection: bool,
     scan_rename_to_guid: bool,
+    scan_prefer_display_aspect_ratios: bool,
 }
 
 impl Default for AppSettings {
@@ -88,6 +89,7 @@ impl Default for AppSettings {
             scan_detect_low_res: true,
             scan_feature_detection: true,
             scan_rename_to_guid: false,
+            scan_prefer_display_aspect_ratios: false,
         }
     }
 }
@@ -145,6 +147,7 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.set_detect_low_resolution(settings.scan_detect_low_res);
         ui.set_enable_feature_detection(settings.scan_feature_detection);
         ui.set_rename_to_guid(settings.scan_rename_to_guid);
+        ui.set_prefer_display_aspect_ratios(settings.scan_prefer_display_aspect_ratios);
         if let Some(archive) = &settings.archive_path {
             ui.set_settings_archive_path(archive.clone().into());
         }
@@ -215,7 +218,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     return;
                 }
 
-                let root_path = PathBuf::from(root_text);
+                let root_path = PathBuf::from(&root_text);
                 if !root_path.exists() {
                     ui.set_status_text("Root directory does not exist.".into());
                     return;
@@ -228,6 +231,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     settings_mut.scan_detect_low_res = ui.get_detect_low_resolution();
                     settings_mut.scan_feature_detection = ui.get_enable_feature_detection();
                     settings_mut.scan_rename_to_guid = ui.get_rename_to_guid();
+                    settings_mut.scan_prefer_display_aspect_ratios = ui.get_prefer_display_aspect_ratios();
+                    settings_mut.last_root_path = Some(root_text.clone());
                     save_settings(&settings_mut);
                 }
 
@@ -245,11 +250,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 let detect_low_resolution = ui.get_detect_low_resolution();
                 let enable_classification = ui.get_enable_classification();
                 let enable_feature_detection = ui.get_enable_feature_detection();
+                let prefer_display_aspect_ratios = ui.get_prefer_display_aspect_ratios();
                 let config = build_scan_config(
                     rename_to_guid,
                     detect_low_resolution,
                     enable_classification,
                     enable_feature_detection,
+                    prefer_display_aspect_ratios,
                 );
 
                 let ui_weak = ui_weak.clone();
@@ -1138,7 +1145,47 @@ fn calculate_aspect_ratio(width: u32, height: u32) -> String {
         return String::new();
     }
 
-    // Calculate GCD to reduce fraction
+    let ratio = width as f32 / height as f32;
+
+    const RATIOS: &[(f32, &str)] = &[
+        // Landscape
+        (1.0, "1:1"),
+        (5.0/4.0, "5:4"),      // 1.25
+        (4.0/3.0, "4:3"),      // 1.333
+        (3.0/2.0, "3:2"),      // 1.5
+        (16.0/10.0, "16:10"), // 1.6
+        (5.0/3.0, "5:3"),      // 1.666
+        (16.0/9.0, "16:9"),    // 1.777
+        (21.0/9.0, "21:9"),    // 2.333
+        (2.39, "2.39:1"),      // 2.39, anamorphic
+        // Portrait
+        (4.0/5.0, "4:5"),
+        (3.0/4.0, "3:4"),
+        (2.0/3.0, "2:3"),
+        (10.0/16.0, "10:16"),
+        (3.0/5.0, "3:5"),
+        (9.0/16.0, "9:16"),
+        (9.0/21.0, "9:21"),
+    ];
+
+    let mut closest_ratio = "";
+    let mut min_diff = f32::MAX;
+
+    for &(r, name) in RATIOS {
+        let diff = (ratio - r).abs();
+        if diff < min_diff {
+            min_diff = diff;
+            closest_ratio = name;
+        }
+    }
+
+    // Threshold to decide if we use the common ratio or the exact one.
+    // If the difference is less than 2%, use the common ratio.
+    if min_diff < 0.02 {
+        return closest_ratio.to_string();
+    }
+
+    // Calculate GCD to reduce fraction for non-common ratios
     fn gcd(mut a: u32, mut b: u32) -> u32 {
         while b != 0 {
             let temp = b;
@@ -1339,6 +1386,7 @@ fn build_scan_config(
     detect_low_resolution: bool,
     enable_classification: bool,
     enable_feature_detection: bool,
+    prefer_display_aspect_ratios: bool,
 ) -> ScanConfig {
     let mut config = ScanConfig::new(default_extensions(), ThreadingMode::Parallel);
     if let Some(mut dir) = dirs::data_local_dir() {
@@ -1351,6 +1399,7 @@ fn build_scan_config(
         .with_low_resolution_detection(detect_low_resolution)
         .with_classification(enable_classification)
         .with_feature_detection(enable_feature_detection)
+        .with_prefer_display_aspect_ratios(prefer_display_aspect_ratios)
 }
 
 fn default_extensions() -> Vec<String> {

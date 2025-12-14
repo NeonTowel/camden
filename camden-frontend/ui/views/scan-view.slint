@@ -14,6 +14,7 @@ export component ScanView inherits Rectangle {
     in-out property <bool> detect-low-res: true;
     in-out property <bool> feature-detection: true;
     in-out property <bool> rename-to-guid: false;
+    in-out property <bool> prefer-display-aspect-ratios: false;
 
     // Scan state
     in property <bool> scanning: false;
@@ -146,6 +147,12 @@ export component ScanView inherits Rectangle {
                         CheckBox {
                             text: "Feature detection (crops)";
                             checked <=> feature-detection;
+                            enabled: !scanning;
+                        }
+
+                        CheckBox {
+                            text: "Prefer display aspect ratios";
+                            checked <=> prefer-display-aspect-ratios;
                             enabled: !scanning;
                         }
 

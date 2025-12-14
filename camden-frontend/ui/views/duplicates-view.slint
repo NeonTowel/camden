@@ -5,6 +5,7 @@ import { PhotoData, PhotoCard } from "../components/photo-card.slint";
 import { ResolutionBadge, ModerationBadge } from "../components/badge.slint";
 import { Theme } from "../components/theme.slint";
 
+
 // Duplicate group data
 export struct DuplicateGroup {
     fingerprint: string,
@@ -36,6 +37,8 @@ component DuplicateGroupCard inherits Rectangle {
     property <length> card_base_height: 260px;
     property <length> card_display_width: (card_base_width / 1px) * (zoom-level / 100.0) * 1px;
     property <length> card_display_height: (card_base_height / 1px) * (zoom-level / 100.0) * 1px;
+    property <length> card_height: card_display_height + 100px;
+    height: card-height;
 
     border-radius: 8px;
     border-width: 1px;
@@ -76,7 +79,7 @@ component DuplicateGroupCard inherits Rectangle {
                 }
             }
 
-            if group.reclaimable_bytes > 0 : Rectangle {
+            if group.reclaimable_bytes > 0: Rectangle {
                 height: 20px;
                 border-radius: 4px;
                 background: Theme.colors.accent_warning.with_alpha(0.15);
@@ -94,27 +97,34 @@ component DuplicateGroupCard inherits Rectangle {
                 }
             }
 
-            Rectangle { horizontal-stretch: 1; }
-
-            // Quick actions
-            if group.files.length > 1 : Button {
-                text: "Select Best";
-                clicked => { select-best(group-index); }
+            Rectangle {
+                horizontal-stretch: 1;
             }
 
-            if group.files.length > 1 : Button {
+            // Quick actions
+            if group.files.length > 1: Button {
+                text: "Select Best";
+                clicked => {
+                    select-best(group-index);
+                }
+            }
+
+            if group.files.length > 1: Button {
                 text: "Archive Others";
-                clicked => { archive-others(group-index); }
+                clicked => {
+                    archive-others(group-index);
+                }
             }
         }
 
         // Files grid with horizontal scrolling
         ScrollView {
+            height: card_display_height;
             HorizontalLayout {
                 spacing: 12px;
                 alignment: start;
 
-                for file[file-index] in group.files : Rectangle {
+                for file[file-index] in group.files: Rectangle {
                     width: card_display_width;
                     height: card_display_height;
                     clip: true;
@@ -125,7 +135,9 @@ component DuplicateGroupCard inherits Rectangle {
                         photo: file;
                         show-selection: true;
                         compact: false;
-                        toggle-selected => { file-toggled(group-index, file-index); }
+                        toggle-selected => {
+                            file-toggled(group-index, file-index);
+                        }
                     }
                 }
             }
@@ -136,7 +148,7 @@ component DuplicateGroupCard inherits Rectangle {
             spacing: 12px;
             alignment: start;
 
-            for file[file-index] in group.files : Rectangle {
+            for file[file-index] in group.files: Rectangle {
                 width: card_display_width;
 
                 VerticalLayout {
@@ -197,7 +209,7 @@ export component DuplicatesView inherits Rectangle {
 
     HorizontalLayout {
         // Sidebar - responsive
-        if sidebar_expanded : Rectangle {
+        if sidebar_expanded: Rectangle {
             width: sidebar_width;
             background: Theme.colors.bg_card;
             border-width: 0px;
@@ -227,6 +239,7 @@ export component DuplicatesView inherits Rectangle {
                             color: Theme.colors.text_secondary;
                             horizontal-stretch: 1;
                         }
+
                         Text {
                             text: stats.total_groups;
                             font-size: 10pt;
@@ -243,6 +256,7 @@ export component DuplicatesView inherits Rectangle {
                             color: Theme.colors.text_secondary;
                             horizontal-stretch: 1;
                         }
+
                         Text {
                             text: stats.total_duplicates;
                             font-size: 10pt;
@@ -259,6 +273,7 @@ export component DuplicatesView inherits Rectangle {
                             color: Theme.colors.text_secondary;
                             horizontal-stretch: 1;
                         }
+
                         Text {
                             text: round(stats.reclaimable_mb * 10) / 10 + " MB";
                             font-size: 10pt;
@@ -275,6 +290,7 @@ export component DuplicatesView inherits Rectangle {
                             color: Theme.colors.text_secondary;
                             horizontal-stretch: 1;
                         }
+
                         Text {
                             text: stats.selected_count;
                             font-size: 10pt;
@@ -284,7 +300,9 @@ export component DuplicatesView inherits Rectangle {
                     }
                 }
 
-                Rectangle { height: 8px; }
+                Rectangle {
+                    height: 8px;
+                }
 
                 // Filter section
                 Text {
@@ -309,7 +327,9 @@ export component DuplicatesView inherits Rectangle {
                     }
                 }
 
-                Rectangle { height: 8px; }
+                Rectangle {
+                    height: 8px;
+                }
 
                 // Actions section
                 Text {
@@ -325,18 +345,24 @@ export component DuplicatesView inherits Rectangle {
 
                     Button {
                         text: "Select All Best";
-                        clicked => { select-all-best(); }
+                        clicked => {
+                            select-all-best();
+                        }
                     }
 
                     Button {
                         text: "Archive Selected (" + stats.selected_count + ")";
                         enabled: stats.selected_count > 0;
-                        clicked => { archive-selected(); }
+                        clicked => {
+                            archive-selected();
+                        }
                     }
                 }
 
                 // Spacer
-                Rectangle { vertical-stretch: 1; }
+                Rectangle {
+                    vertical-stretch: 1;
+                }
             }
         }
 
@@ -349,15 +375,17 @@ export component DuplicatesView inherits Rectangle {
                 padding-left: 16px;
                 padding-right: 16px;
                 padding-bottom: 0px;
-                spacing: 0px;
+                spacing: 12px; // Added spacing here
                 vertical-stretch: 1;
 
                 Rectangle {
+                    horizontal-stretch: 1;
                     vertical-stretch: 1;
                     clip: true;
 
                     VerticalLayout {
                         spacing: 12px;
+                        vertical-stretch: 1;
 
                         // Header
                         HorizontalLayout {
@@ -389,11 +417,12 @@ export component DuplicatesView inherits Rectangle {
                                 }
                             }
 
-                            Rectangle { horizontal-stretch: 1; }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                            }
                         }
 
-                        // Empty state
-                        if groups.length == 0 : Rectangle {
+                        if groups.length == 0: Rectangle {
                             vertical-stretch: 1;
                             background: Theme.colors.bg_card;
                             border-radius: 8px;
@@ -425,126 +454,43 @@ export component DuplicatesView inherits Rectangle {
                             }
                         }
 
-                        // Groups list
-                        if groups.length > 0 : ScrollView {
+                        if groups.length > 0: ScrollView {
                             horizontal-stretch: 1;
                             vertical-stretch: 1;
 
-                            VerticalLayout {
-                                spacing: 12px;
+                            // Layout helpers
+                            property <length> card_base_height: 260px;
+                            property <length> card_chrome_height: 100px;
+                            property <length> card_display_height: (card_base_height / 1px) * (zoom-level / 100.0) * 1px;
+                            property <length> card_height: card_display_height + card_chrome_height;
+                            property <length> card_spacing: 12px;
+                            property <length> content_height: groups.length * card_height + (max(0, groups.length - 1)) * card_spacing;
+                            viewport-height: content_height;
 
-                                for group[group-index] in groups : DuplicateGroupCard {
+                            Rectangle {
+                                height: content_height;
+                                for group[group-index] in groups: DuplicateGroupCard {
+                                    y: group-index * (card_height + card_spacing);
+                                    width: 100%;
                                     group: group;
                                     group-index: group-index;
                                     zoom-level: zoom-level;
-                                    file-toggled(gi, fi) => { file-toggled(gi, fi); }
-                                    select-best(gi) => { select-best-in-group(gi); }
-                                    archive-others(gi) => { archive-others-in-group(gi); }
+                                    file-toggled(gi, fi) => {
+                                        file-toggled(gi, fi);
+                                    }
+                                    select-best(gi) => {
+                                        select-best-in-group(gi);
+                                    }
+                                    archive-others(gi) => {
+                                        archive-others-in-group(gi);
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                // Zoom slider section
-                Rectangle {
-                    height: 40px;
-                    margin-top: 16px;
-                    background: Theme.colors.bg_card;
-                    border-width: 1px;
-                    border-color: Theme.colors.border_default;
-                    border-radius: 4px;
 
-                    HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        spacing: 8px;
-
-                        Rectangle { horizontal-stretch: 1; }
-
-                        // Zoom out button
-                        Button {
-                            text: "−";
-                            width: 32px;
-                            clicked => {
-                                if zoom-level > 100.0 {
-                                    zoom-level = max(100.0, zoom-level - 25.0);
-                                }
-                            }
-                        }
-
-                        // Zoom percentage display
-                        Rectangle {
-                            width: 50px;
-                            height: 100%;
-
-                            Text {
-                                text: round(zoom-level) + "%";
-                                font-size: 10pt;
-                                color: Theme.colors.text_secondary;
-                                vertical-alignment: center;
-                                horizontal-alignment: center;
-                            }
-                        }
-
-                        // Zoom slider
-                        Rectangle {
-                            width: 150px;
-                            height: 100%;
-
-                            // Slider background
-                            Rectangle {
-                                width: 100%;
-                                y: (parent.height - 4px) / 2;
-                                height: 4px;
-                                border-radius: 2px;
-                                background: Theme.colors.bg_secondary;
-
-                                Rectangle {
-                                    width: ((zoom-level - 100.0) / 300.0) * parent.width;
-                                    height: 100%;
-                                    background: Theme.colors.accent_primary;
-                                    border-radius: 2px;
-                                }
-                            }
-
-                            // Slider thumb
-                            Rectangle {
-                                width: 12px;
-                                height: 12px;
-                                x: ((zoom-level - 100.0) / 300.0) * (parent.width - self.width);
-                                y: (parent.height - self.height) / 2;
-                                border-radius: 6px;
-                                background: Theme.colors.accent_primary;
-                                border-width: 2px;
-                                border-color: white;
-                            }
-
-                            // Click area to set zoom level
-                            TouchArea {
-                                width: 100%;
-                                height: 100%;
-                                mouse-cursor: pointer;
-
-                                clicked => {
-                                    // Get mouse position relative to the slider
-                                    // For now, just provide visual feedback through button controls
-                                }
-                            }
-                        }
-
-                        // Zoom in button
-                        Button {
-                            text: "+";
-                            width: 32px;
-                            clicked => {
-                                if zoom-level < 400.0 {
-                                    zoom-level = min(400.0, zoom-level + 25.0);
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
     }
